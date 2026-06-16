@@ -350,17 +350,9 @@ async function copyBetweenDrivers(fs, sourceCtx, targetCtx, sourcePath, targetPa
       });
     }
 
-    // 推导文件名：
-    // - FS 视图约定：以 "/" 结尾的是目录，其余视为文件路径
-    // - 若 targetPath 为目录路径，则自动复用源文件名；否则使用 targetPath 最后一段作为目标文件名
-    const targetSegments = targetPath.split("/").filter(Boolean);
-    const sourceSegments = sourcePath.split("/").filter(Boolean);
-    const sourceFileName =
-      sourceSegments[sourceSegments.length - 1] || "file";
-    const targetLeaf = targetSegments[targetSegments.length - 1] || "";
-    const targetIsDirectory = isDirectoryPath(targetPath);
-
-    const filename = targetIsDirectory ? sourceFileName : (targetLeaf || sourceFileName);
+    // 跨驱动复制传入的 targetPath 已经是完整目标文件路径。
+    // 不再额外传 filename，避免 S3/WebDAV 等驱动把文件名二次拼接为 file/file。
+    const filename = undefined;
 
     // 2. 如果提供了进度回调，包装流以监控字节传输
     let streamToUpload = body;
@@ -419,6 +411,12 @@ async function copyBetweenDrivers(fs, sourceCtx, targetCtx, sourcePath, targetPa
       }
     }
   }
+}
+
+function describeCopyError(error) {
+  const message = error?.message || "复制失败";
+  const cause = error?.details?.cause || error?.cause?.message || error?.cause || null;
+  return cause && cause !== message ? `${message}；原因：${cause}` : message;
 }
 
 /**
@@ -527,7 +525,7 @@ async function copyDirectoryBetweenDrivers(fs, sourceCtx, targetCtx, sourcePath,
               source: fileSourcePath,
               target: fileTargetPath,
               status: "failed",
-              message: err?.message || "复制失败",
+              message: describeCopyError(err),
             });
           }
         }
@@ -537,7 +535,7 @@ async function copyDirectoryBetweenDrivers(fs, sourceCtx, targetCtx, sourcePath,
         source: currentDir,
         target: targetBase,
         status: "failed",
-        message: err?.message || "列出目录失败",
+        message: describeCopyError(err) || "列出目录失败",
       });
     }
   }
