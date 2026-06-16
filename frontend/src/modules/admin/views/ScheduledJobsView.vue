@@ -1087,8 +1087,10 @@ const jobColumnClasses = {
         :selectable="true"
         :selected-items="selectedJobs"
         row-id-field="taskId"
+        :row-clickable="true"
         :empty-text="t('admin.scheduledJobs.empty.title')"
         @selection-change="handleSelectionChange"
+        @row-click="handleViewDetail"
       >
         <!-- 移动端卡片视图 -->
         <template #mobile="{ data }">
@@ -1101,6 +1103,7 @@ const jobColumnClasses = {
                 darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200',
                 !job.enabled ? 'opacity-70' : ''
               ]"
+              @click="handleViewDetail(job)"
             >
               <!-- 卡片头部 -->
               <div class="px-5 py-3 flex justify-between items-center gap-2 border-b" :class="darkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'">
@@ -1108,6 +1111,7 @@ const jobColumnClasses = {
                   <input 
                     type="checkbox" 
                     :checked="selectedJobs.includes(job.taskId)" 
+                    @click.stop
                     @change="handleSelectionChange({ type: 'toggle-item', id: job.taskId })"
                     class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                   />
@@ -1165,7 +1169,7 @@ const jobColumnClasses = {
                 <div class="mt-3 flex flex-wrap gap-2">
                   <!-- 启用/禁用按钮 -->
                   <button 
-                    @click="handleToggleEnabled(job)" 
+                    @click.stop="handleToggleEnabled(job)"
                     class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition" 
                     :class="job.enabled ? (darkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-800') : (darkMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-green-100 hover:bg-green-200 text-green-800')"
                   >
@@ -1176,7 +1180,7 @@ const jobColumnClasses = {
                   
                   <!-- 立即执行按钮 -->
                   <button
-                    @click="handleRunNow(job)"
+                    @click.stop="handleRunNow(job)"
                     :disabled="isJobRunning(job.taskId)"
                     class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="darkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-100 hover:bg-blue-200 text-blue-800'"
@@ -1188,7 +1192,7 @@ const jobColumnClasses = {
                   
                   <!-- 查看详情按钮 -->
                   <button 
-                    @click="handleViewDetail(job)" 
+                    @click.stop="handleViewDetail(job)"
                     class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition" 
                     :class="darkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-100 hover:bg-blue-200 text-blue-800'"
                   >
@@ -1198,7 +1202,7 @@ const jobColumnClasses = {
                   
                   <!-- 编辑按钮 -->
                   <button
-                    @click="navigateToEdit(job)"
+                    @click.stop="navigateToEdit(job)"
                     :disabled="job.handlerExists === false"
                     class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition disabled:opacity-50"
                     :class="darkMode ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-amber-100 hover:bg-amber-200 text-amber-800'"
@@ -1209,7 +1213,7 @@ const jobColumnClasses = {
                   
                   <!-- 删除按钮 -->
                   <button 
-                    @click="handleDelete(job)" 
+                    @click.stop="handleDelete(job)"
                     class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition" 
                     :class="darkMode ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-red-100 hover:bg-red-200 text-red-800'"
                   >

@@ -30,7 +30,13 @@
               {{ props.emptyText }}
             </td>
           </tr>
-          <tr v-for="row in table.getRowModel().rows" :key="row.id" class="hover:bg-gray-50 dark:hover:bg-gray-700">
+          <tr
+            v-for="row in table.getRowModel().rows"
+            :key="row.id"
+            class="hover:bg-gray-50 dark:hover:bg-gray-700"
+            :class="{ 'cursor-pointer': props.rowClickable }"
+            @click="handleRowClick(row.original)"
+          >
             <td
               v-for="cell in row.getVisibleCells()"
               :key="cell.id"
@@ -97,9 +103,13 @@ const props = defineProps({
     type: String,
     default: "id",
   },
+  rowClickable: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(["sort-change", "selection-change"]);
+const emit = defineEmits(["sort-change", "selection-change", "row-click"]);
 
 // 创建列定义助手
 const columnHelper = createColumnHelper();
@@ -117,19 +127,24 @@ const tanstackColumns = computed(() => {
           h("input", {
             type: "checkbox",
             checked: props.data.length > 0 && (props.selectedItems || []).length === props.data.length,
-            onClick: () => emit("selection-change", { type: "toggle-all" }),
+            onClick: (event) => {
+              event.stopPropagation();
+              emit("selection-change", { type: "toggle-all" });
+            },
             class: "h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer",
           }),
         cell: ({ row }) =>
           h("input", {
             type: "checkbox",
             checked: (props.selectedItems || []).includes(row.original[props.rowIdField]),
-            onClick: () =>
+            onClick: (event) => {
+              event.stopPropagation();
               emit("selection-change", {
                 type: "toggle-item",
                 id: row.original[props.rowIdField],
                 item: row.original,
-              }),
+              });
+            },
             class: "h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded cursor-pointer",
           }),
         enableSorting: false,
@@ -235,5 +250,10 @@ const handleSort = (column) => {
   if (column.getCanSort()) {
     column.toggleSorting();
   }
+};
+
+const handleRowClick = (row) => {
+  if (!props.rowClickable) return;
+  emit("row-click", row);
 };
 </script>

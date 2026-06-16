@@ -173,8 +173,10 @@
           :selectable="true"
           :selected-items="selectedTasks"
           row-id-field="jobId"
+          :row-clickable="true"
           :empty-text="t('admin.tasks.empty.tableNoData')"
           @selection-change="handleSelectionChange"
+          @row-click="handleTaskRowClick"
         >
           <!-- Mobile Card View -->
           <template #mobile="{ data }">
@@ -182,7 +184,8 @@
               <div
                 v-for="task in data"
                 :key="task.jobId"
-                class="rounded-lg shadow-md overflow-hidden border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                class="rounded-lg shadow-md overflow-hidden border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-pointer"
+                @click="handleTaskRowClick(task)"
               >
                 <!-- Card Header -->
                 <div class="px-5 py-3 flex items-center justify-between gap-2 border-b bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600">
@@ -512,6 +515,11 @@ const selectedTask = computed(() => {
   if (!selectedTaskId.value) return null
   return tasks.value.find(t => t.jobId === selectedTaskId.value) || null
 })
+
+const handleTaskRowClick = (task) => {
+  if (!task?.jobId) return
+  selectedTaskId.value = task.jobId
+}
 
 // Table Columns Configuration
 const taskColumns = computed(() => [
