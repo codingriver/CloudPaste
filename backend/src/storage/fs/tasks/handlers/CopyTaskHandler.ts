@@ -441,27 +441,45 @@ export class CopyTaskHandler implements TaskHandler {
           copyCheckpoint: { currentIndex: currentIndex + 1, startAfter: null, activeDirectory: null, initialized: true },
         });
       } else if (resultStatus === "failed") {
+        const details = copyResult?.stats || {};
+        const detailSuccess = Number(details?.success || 0);
+        const detailFailed = Number(details?.failed || 0);
+        const detailSkipped = Number(details?.skipped || 0);
+        const failedItems = Array.isArray(copyResult?.details) ? copyResult.details : [];
+        const firstFailure = failedItems[0]?.message || failedItems[0]?.error || null;
         itemResults[currentIndex].status = "failed";
-        itemResults[currentIndex].error = copyResult?.message || copyResult?.error || "复制失败";
+        itemResults[currentIndex].error = firstFailure || copyResult?.message || copyResult?.error || "复制失败";
+        itemResults[currentIndex].meta = {
+          ...(itemResults[currentIndex].meta || {}),
+          copyDetails: {
+            ...details,
+            failedItems: failedItems.slice(0, 20),
+          },
+        };
         await context.updateProgress(job.jobId, {
-          processedItems: baseProcessed + 1,
-          successCount: baseSuccess,
-          failedCount: baseFailed + 1,
-          skippedCount: baseSkipped,
+          processedItems: baseProcessed + Math.max(1, detailSuccess + detailFailed + detailSkipped),
+          totalItems: Math.max(Number(currentStats.totalItems || payload.items.length), payload.items.length - 1 + detailSuccess + detailFailed + detailSkipped),
+          successCount: baseSuccess + detailSuccess,
+          failedCount: baseFailed + Math.max(1, detailFailed),
+          skippedCount: baseSkipped + detailSkipped,
           itemResults,
           copyCheckpoint: { currentIndex: currentIndex + 1, startAfter: null, activeDirectory: null, initialized: true },
         });
       } else if (resultStatus === "partial") {
-        const details = copyResult?.details || {};
+        const details = copyResult?.stats || copyResult?.details || {};
         const detailSuccess = Number(details?.success || 0);
         const detailFailed = Number(details?.failed || 0);
         const detailSkipped = Number(details?.skipped || 0);
+        const failedItems = Array.isArray(copyResult?.details) ? copyResult.details : [];
         itemResults[currentIndex].status = detailFailed > 0 ? "failed" : "success";
         itemResults[currentIndex].message = copyResult?.message || "部分完成";
-        itemResults[currentIndex].error = detailFailed > 0 ? `复制存在 ${detailFailed} 个失败项` : undefined;
+        itemResults[currentIndex].error = detailFailed > 0 ? failedItems[0]?.message || `复制存在 ${detailFailed} 个失败项` : undefined;
         itemResults[currentIndex].meta = {
           ...(itemResults[currentIndex].meta || {}),
-          copyDetails: details,
+          copyDetails: {
+            ...details,
+            failedItems: failedItems.slice(0, 20),
+          },
         };
         await context.updateProgress(job.jobId, {
           processedItems: baseProcessed + detailSuccess + detailFailed + detailSkipped,
