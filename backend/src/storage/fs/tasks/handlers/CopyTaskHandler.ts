@@ -19,11 +19,10 @@ const DOCKER_PROGRESS_INTERVAL_MS = 500;
 const PRESCAN_CONCURRENCY_WORKERS = 6;
 const PRESCAN_CONCURRENCY_DOCKER = 10;
 
-// Workers 单次 invocation 的子请求数量有限。目录复制在同存储 S3/R2 下会对每个对象发起 CopyObject，
-// 这里先用保守阈值让大目录返回 partial，避免耗尽配额后把真实错误包装成后续的源路径检查失败。
+// Workers 单次 invocation 的子请求数量有限。目录复制在同存储 S3/R2 下会对每个对象发起 CopyObject。
+// 首次按配置值执行；如果驱动捕捉到 invocation/subrequest 限制，后续续跑会自动减半降档。
 const WORKERS_DIRECTORY_COPY_OBJECT_LIMIT = 10;
 const MAX_WORKERS_DIRECTORY_COPY_OBJECT_LIMIT = 100;
-const WORKERS_DIRECTORY_COPY_SAFE_OBJECT_LIMIT = 20;
 
 function isDirectoryPathHint(path: string | undefined): boolean {
   return typeof path === "string" && path.endsWith("/");
@@ -70,7 +69,7 @@ function clampDirectoryCopyChunkSize(value: unknown): number {
 function getEffectiveDirectoryCopyChunkSize(configuredSize: number, activeDirectory?: Record<string, any> | null): number {
   const configured = Math.max(1, Math.floor(Number(configuredSize) || WORKERS_DIRECTORY_COPY_OBJECT_LIMIT));
   const limitHits = Math.max(0, Math.floor(Number(activeDirectory?.invocationLimitReachedCount || 0)));
-  let effective = Math.min(configured, WORKERS_DIRECTORY_COPY_SAFE_OBJECT_LIMIT);
+  let effective = configured;
 
   for (let i = 0; i < limitHits; i += 1) {
     effective = Math.max(1, Math.floor(effective / 2));

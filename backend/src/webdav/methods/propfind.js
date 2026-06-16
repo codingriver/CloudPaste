@@ -708,12 +708,18 @@ async function handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo
     if (requestInfo.depth === "0") {
       // 只获取当前资源信息
       try {
-        const fileInfo = await fileSystem.getFileInfo(path, userIdOrInfo, actualUserType);
+        // WebDAV clients such as Joplin commonly probe collection URLs with a
+        // trailing slash and Depth: 0. Treat that path shape as a directory
+        // stat instead of passing it to file stat, because some drivers cannot
+        // stat collection marker paths reliably.
+        const fileInfo = path.endsWith("/")
+          ? await fileSystem.listDirectory(path, userIdOrInfo, actualUserType)
+          : await fileSystem.getFileInfo(path, userIdOrInfo, actualUserType);
         result = {
           path: path,
-          isDirectory: fileInfo.isDirectory,
+          isDirectory: path.endsWith("/") ? true : fileInfo.isDirectory,
           name: fileInfo.name,
-          size: fileInfo.size,
+          size: path.endsWith("/") ? 0 : fileInfo.size,
           modified: fileInfo.modified,
           created: fileInfo.created,
           items: [], // depth=0时不包含子项

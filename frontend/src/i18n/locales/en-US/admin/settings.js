@@ -12,6 +12,8 @@ export default {
       unitMB: "MB",
       unitGB: "GB",
       validationError: "Please enter a valid upload size limit",
+      maxPasteSizeLabel: "Maximum paste size",
+      maxPasteSizeHint: "Limit the size of text shares in MB. Create and update requests above this limit will be rejected; use file sharing for larger content.",
       defaultUseProxyLabel: "Use proxy by default for new files",
       defaultUseProxyHint: "When enabled, new files will use Worker proxy by default; when disabled, direct links will be used by default",
       fileOverwriteModeLabel: "File Overwrite Mode",
@@ -33,6 +35,7 @@ export default {
       directoryChunkSizeLabel: "Directory copy objects per chunk",
       directoryChunkSizeHint: "Default is 10, allowed range 1-100. This is a target value; the Worker runtime will automatically reduce it and continue if subrequest limits are hit.",
       itemsUnit: "items",
+      validationError: "Please enter a valid directory copy objects-per-chunk value (1-100)",
     },
     deleteSettings: {
       title: "Batch Delete Settings",
@@ -40,6 +43,7 @@ export default {
       directoryChunkSizeLabel: "Directory delete objects per batch",
       directoryChunkSizeHint: "Default is 1000. The S3/R2 bulk delete API supports up to 1000 objects per request; lower it if Worker limits still occur.",
       itemsUnit: "items",
+      validationError: "Please enter a valid directory delete objects-per-batch value (1-1000)",
     },
     buttons: {
       updateSettings: "Update Settings",

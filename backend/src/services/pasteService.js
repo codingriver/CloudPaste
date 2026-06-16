@@ -3,8 +3,22 @@ import { generateRandomString, createErrorResponse, validateSlugFormat } from ".
 import { hashPassword, verifyPassword } from "../utils/crypto.js";
 import { AppError, ValidationError, ConflictError, NotFoundError, AuthenticationError } from "../http/errors.js";
 import { ensureRepositoryFactory } from "../utils/repositories.js";
+import { getMaxPasteSize } from "./systemService.js";
 
 const resolveRepositoryFactory = ensureRepositoryFactory;
+
+function getUtf8ByteLength(content) {
+  return new TextEncoder().encode(String(content || "")).length;
+}
+
+async function validatePasteContentSize(db, content, repositoryFactory = null) {
+  const maxPasteSizeMb = await getMaxPasteSize(db, repositoryFactory);
+  const maxBytes = Math.max(1, Number(maxPasteSizeMb || 2)) * 1024 * 1024;
+  const contentBytes = getUtf8ByteLength(content);
+  if (contentBytes > maxBytes) {
+    throw new ValidationError(`内容过大，超过最大限制(${maxPasteSizeMb}MB)`);
+  }
+}
 
 /**
  * 生成唯一的文本分享短链接slug
@@ -164,6 +178,8 @@ export async function createPaste(db, pasteData, created_by, repositoryFactory =
   if (!pasteData.content) {
     throw new ValidationError("内容不能为空");
   }
+
+  await validatePasteContentSize(db, pasteData.content, repositoryFactory);
 
   // 验证可打开次数不能为负数
   if (pasteData.max_views !== null && pasteData.max_views !== undefined && parseInt(pasteData.max_views) < 0) {
@@ -587,6 +603,8 @@ export async function updatePaste(db, slug, updateData, created_by = null, repos
   if (!updateData.content) {
     throw new ValidationError("内容不能为空");
   }
+
+  await validatePasteContentSize(db, updateData.content, repositoryFactory);
 
   // 验证可打开次数
   if (updateData.max_views !== null && updateData.max_views !== undefined && parseInt(updateData.max_views) < 0) {

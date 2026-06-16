@@ -20,20 +20,30 @@ const uploadSettings = ref({
   defaultUseProxy: false,
   copyDirectoryChunkSize: 10,
   deleteDirectoryChunkSize: 1000,
+  maxPasteSizeMb: 2,
 });
 
 const signSettings = ref({ signAll: false, expires: 0 });
 const sizeUnits = ["KB", "MB", "GB"];
 const isLoading = ref(false);
 const isSavingUpload = ref(false);
+const isSavingCopy = ref(false);
+const isSavingDelete = ref(false);
 const isSavingSign = ref(false);
 
 const isUploadFormValid = computed(() => {
+  const pasteSize = Number(uploadSettings.value.maxPasteSizeMb);
+  return uploadSettings.value.max_upload_size > 0 && Number.isInteger(pasteSize) && pasteSize >= 1 && pasteSize <= 50;
+});
+
+const isCopyFormValid = computed(() => {
   const copySize = Number(uploadSettings.value.copyDirectoryChunkSize);
+  return Number.isInteger(copySize) && copySize >= 1 && copySize <= 100;
+});
+
+const isDeleteFormValid = computed(() => {
   const deleteSize = Number(uploadSettings.value.deleteDirectoryChunkSize);
-  return uploadSettings.value.max_upload_size > 0 &&
-    Number.isInteger(copySize) && copySize >= 1 && copySize <= 100 &&
-    Number.isInteger(deleteSize) && deleteSize >= 1 && deleteSize <= 1000;
+  return Number.isInteger(deleteSize) && deleteSize >= 1 && deleteSize <= 1000;
 });
 
 onMounted(async () => {
@@ -57,6 +67,9 @@ onMounted(async () => {
           break;
         case "delete_directory_chunk_size":
           uploadSettings.value.deleteDirectoryChunkSize = parseInt(setting.value) || 1000;
+          break;
+        case "max_paste_size_mb":
+          uploadSettings.value.maxPasteSizeMb = Math.min(Math.max(parseInt(setting.value) || 2, 1), 50);
           break;
         case "proxy_sign_all":
           signSettings.value.signAll = setting.value === "true";
@@ -93,8 +106,7 @@ const handleSaveUpload = async () => {
       max_upload_size: Math.round(convertedSize),
       file_naming_strategy: uploadSettings.value.enableOverwrite ? "overwrite" : "random_suffix",
       default_use_proxy: uploadSettings.value.defaultUseProxy.toString(),
-      copy_directory_chunk_size: String(uploadSettings.value.copyDirectoryChunkSize),
-      delete_directory_chunk_size: String(uploadSettings.value.deleteDirectoryChunkSize),
+      max_paste_size_mb: String(uploadSettings.value.maxPasteSizeMb),
     });
     showSuccess(t("admin.global.messages.updateSuccess"));
   } catch (error) {
@@ -118,6 +130,46 @@ const handleSaveSign = async () => {
     showError(error.message || t("admin.global.messages.updateFailed"));
   } finally {
     isSavingSign.value = false;
+  }
+};
+
+const handleSaveCopy = async () => {
+  if (!isCopyFormValid.value) {
+    showError(t("admin.global.copySettings.validationError"));
+    return;
+  }
+
+  isSavingCopy.value = true;
+  try {
+    await updateGlobalSettings({
+      copy_directory_chunk_size: String(uploadSettings.value.copyDirectoryChunkSize),
+    });
+    showSuccess(t("admin.global.messages.updateSuccess"));
+  } catch (error) {
+    log.error("更新复制设置失败:", error);
+    showError(error.message || t("admin.global.messages.updateFailed"));
+  } finally {
+    isSavingCopy.value = false;
+  }
+};
+
+const handleSaveDelete = async () => {
+  if (!isDeleteFormValid.value) {
+    showError(t("admin.global.deleteSettings.validationError"));
+    return;
+  }
+
+  isSavingDelete.value = true;
+  try {
+    await updateGlobalSettings({
+      delete_directory_chunk_size: String(uploadSettings.value.deleteDirectoryChunkSize),
+    });
+    showSuccess(t("admin.global.messages.updateSuccess"));
+  } catch (error) {
+    log.error("更新删除设置失败:", error);
+    showError(error.message || t("admin.global.messages.updateFailed"));
+  } finally {
+    isSavingDelete.value = false;
   }
 };
 </script>
@@ -176,6 +228,17 @@ const handleSaveSign = async () => {
           <div class="border-t" :class="darkMode ? 'border-gray-700' : 'border-gray-200'"></div>
           <div class="flex items-center justify-between gap-4">
             <div>
+              <label class="block text-sm font-medium" :class="darkMode ? 'text-gray-200' : 'text-gray-700'">{{ t("admin.global.uploadSettings.maxPasteSizeLabel") }}</label>
+              <p class="text-xs mt-0.5" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">{{ t("admin.global.uploadSettings.maxPasteSizeHint") }}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <input v-model.number="uploadSettings.maxPasteSizeMb" type="number" min="1" max="50" step="1" class="w-24 px-3 py-2 border rounded-lg text-sm" :class="darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'" />
+              <span class="text-sm" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">MB</span>
+            </div>
+          </div>
+          <div class="border-t" :class="darkMode ? 'border-gray-700' : 'border-gray-200'"></div>
+          <div class="flex items-center justify-between gap-4">
+            <div>
               <label class="block text-sm font-medium" :class="darkMode ? 'text-gray-200' : 'text-gray-700'">{{ t("admin.global.uploadSettings.defaultUseProxyLabel") }}</label>
               <p class="text-xs mt-0.5" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">{{ t("admin.global.uploadSettings.defaultUseProxyHint") }}</p>
             </div>
@@ -218,9 +281,9 @@ const handleSaveSign = async () => {
           </div>
         </div>
         <div class="px-5 py-4 border-t flex justify-end" :class="darkMode ? 'border-gray-700 bg-gray-800/30' : 'border-gray-100 bg-gray-50/50'">
-          <button type="button" @click="handleSaveUpload" :disabled="isSavingUpload || !isUploadFormValid" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" :class="isSavingUpload ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'">
-            <IconRefresh v-if="isSavingUpload" size="sm" class="animate-spin -ml-0.5 mr-2" />
-            {{ isSavingUpload ? t("admin.global.buttons.updating") : t("admin.global.buttons.updateSettings") }}
+          <button type="button" @click="handleSaveCopy" :disabled="isSavingCopy || !isCopyFormValid" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" :class="isSavingCopy ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'">
+            <IconRefresh v-if="isSavingCopy" size="sm" class="animate-spin -ml-0.5 mr-2" />
+            {{ isSavingCopy ? t("admin.global.buttons.updating") : t("admin.global.buttons.updateSettings") }}
           </button>
         </div>
       </section>
@@ -250,9 +313,9 @@ const handleSaveSign = async () => {
           </div>
         </div>
         <div class="px-5 py-4 border-t flex justify-end" :class="darkMode ? 'border-gray-700 bg-gray-800/30' : 'border-gray-100 bg-gray-50/50'">
-          <button type="button" @click="handleSaveUpload" :disabled="isSavingUpload || !isUploadFormValid" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" :class="isSavingUpload ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'">
-            <IconRefresh v-if="isSavingUpload" size="sm" class="animate-spin -ml-0.5 mr-2" />
-            {{ isSavingUpload ? t("admin.global.buttons.updating") : t("admin.global.buttons.updateSettings") }}
+          <button type="button" @click="handleSaveDelete" :disabled="isSavingDelete || !isDeleteFormValid" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" :class="isSavingDelete ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'">
+            <IconRefresh v-if="isSavingDelete" size="sm" class="animate-spin -ml-0.5 mr-2" />
+            {{ isSavingDelete ? t("admin.global.buttons.updating") : t("admin.global.buttons.updateSettings") }}
           </button>
         </div>
       </section>

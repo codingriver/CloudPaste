@@ -136,6 +136,17 @@ export const DEFAULT_SETTINGS = {
     default_value: "1000",
   },
 
+  max_paste_size_mb: {
+    key: "max_paste_size_mb",
+    type: SETTING_TYPES.NUMBER,
+    group_id: SETTING_GROUPS.GLOBAL,
+    help: "文本分享内容大小上限（MB）。超出后拒绝创建/更新，建议大内容改用文件分享。",
+    options: null,
+    sort_order: 8,
+    flag: SETTING_FLAGS.PUBLIC,
+    default_value: "2",
+  },
+
   // 预览设置组
   preview_text_types: {
     key: "preview_text_types",
@@ -431,6 +442,9 @@ export function validateSettingValue(key, value, type) {
       }
       if (key === "delete_directory_chunk_size") {
         return Number.isInteger(num) && num >= 1 && num <= 1000;
+      }
+      if (key === "max_paste_size_mb") {
+        return Number.isInteger(num) && num >= 1 && num <= 50;
       }
       return true;
 

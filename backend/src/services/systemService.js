@@ -31,6 +31,24 @@ export async function getMaxUploadSize(db, repositoryFactory) {
 }
 
 /**
+ * 获取文本分享最大大小限制
+ * @param {D1Database} db - D1数据库实例
+ * @returns {Promise<number>} 最大文本分享大小(MB)
+ */
+export async function getMaxPasteSize(db, repositoryFactory) {
+  try {
+    const factory = resolveRepositoryFactory(db, repositoryFactory);
+    const systemRepository = factory.getSystemRepository();
+    const setting = await systemRepository.getSettingMetadata("max_paste_size_mb");
+    const value = setting ? parseInt(setting.value, 10) : 2;
+    return Number.isFinite(value) && value > 0 ? value : 2;
+  } catch (error) {
+    console.error("获取最大文本分享大小错误:", error);
+    return 2;
+  }
+}
+
+/**
  * 获取仪表盘统计数据
  * @param {D1Database} db - D1数据库实例
  * @param {string} adminId - 管理员ID

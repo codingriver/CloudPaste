@@ -12,6 +12,8 @@ export default {
       unitMB: "MB",
       unitGB: "GB",
       validationError: "请输入有效的上传大小限制",
+      maxPasteSizeLabel: "文本分享最大大小",
+      maxPasteSizeHint: "限制文本编辑分享内容大小，单位 MB。超出后会拒绝创建或更新，建议大内容改用文件分享。",
       defaultUseProxyLabel: "新文件默认使用代理",
       defaultUseProxyHint: "启用后新文件默认使用Worker代理，禁用后默认使用直链",
       fileOverwriteModeLabel: "文件覆盖模式",
@@ -32,6 +34,7 @@ export default {
       directoryChunkSizeLabel: "目录复制单 chunk 对象数",
       directoryChunkSizeHint: "默认 10，允许 1-100。这里是期望值；Worker 环境遇到子请求上限时会自动降档并续跑。",
       itemsUnit: "个",
+      validationError: "请输入有效的目录复制单 chunk 对象数（1-100）",
     },
     deleteSettings: {
       title: "批量删除设置",
@@ -39,6 +42,7 @@ export default {
       directoryChunkSizeLabel: "目录删除单批次对象数",
       directoryChunkSizeHint: "默认 1000。S3/R2 批量删除接口单次最多支持 1000 个对象；如果仍遇到 Worker 限制可适当调小。",
       itemsUnit: "个",
+      validationError: "请输入有效的目录删除单批次对象数（1-1000）",
     },
     buttons: {
       updateSettings: "更新设置",
