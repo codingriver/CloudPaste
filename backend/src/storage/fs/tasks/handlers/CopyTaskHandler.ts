@@ -103,6 +103,167 @@ function buildDirectoryProgress(activeDirectory: Record<string, any>, chunkSize:
   };
 }
 
+function isInvocationLimitError(error: any): boolean {
+  const message = String(error?.message || error?.details?.cause || error?.cause?.message || error || "");
+  return /too many subrequests|subrequest|invocation/i.test(message);
+}
+
+function normalizeDirectoryPath(path: string): string {
+  const raw = String(path || "/").replace(/\/+/g, "/");
+  const withLeading = raw.startsWith("/") ? raw : `/${raw}`;
+  return withLeading.endsWith("/") ? withLeading : `${withLeading}/`;
+}
+
+function joinDirectoryPath(base: string, relative: string): string {
+  const normalizedBase = normalizeDirectoryPath(base);
+  const cleanRelative = String(relative || "").replace(/^\/+/, "");
+  return `${normalizedBase}${cleanRelative}`.replace(/\/+/g, "/");
+}
+
+async function executeCrossMountDirectoryChunk(params: {
+  fileSystem: any;
+  item: any;
+  job: InternalJob;
+  userId: any;
+  userType: any;
+  activeDirectory: Record<string, any> | null | undefined;
+  configuredChunkSize: number;
+  options: Record<string, any> | undefined;
+}) {
+  const { fileSystem, item, job, userId, userType, options } = params;
+  const sourceBase = normalizeDirectoryPath(item.sourcePath);
+  const targetBase = normalizeDirectoryPath(item.targetPath);
+  const configured = Math.max(1, Math.floor(Number(params.configuredChunkSize || 1)));
+  // 跨存储单文件复制通常至少包含读取、写入和元数据更新，多对象同 invocation 风险很高。
+  const maxEntries = Math.max(1, Math.min(configured, 3));
+  const active = params.activeDirectory?.mode === "cross_mount_directory"
+    ? { ...params.activeDirectory }
+    : {
+        mode: "cross_mount_directory",
+        sourceBase,
+        targetBase,
+        stack: [sourceBase],
+        currentDir: null,
+        entries: [],
+        entryIndex: 0,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        skipped: 0,
+        failedItems: [],
+        lastError: null,
+      };
+
+  let processedThisRun = 0;
+
+  while (processedThisRun < maxEntries) {
+    if (!active.currentDir) {
+      const nextDir = Array.isArray(active.stack) ? active.stack.pop() : null;
+      if (!nextDir) {
+        return { done: true, activeDirectory: active, maxEntries };
+      }
+
+      active.currentDir = normalizeDirectoryPath(nextDir);
+      active.entryIndex = 0;
+
+      const relativeDir = active.currentDir.startsWith(sourceBase) ? active.currentDir.slice(sourceBase.length) : "";
+      const targetDir = joinDirectoryPath(targetBase, relativeDir);
+
+      try {
+        await fileSystem.createDirectory(targetDir, userId, userType);
+      } catch (error: any) {
+        if (isInvocationLimitError(error)) {
+          active.lastError = error?.message || String(error);
+          return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
+        }
+        active.failed += 1;
+        active.processed += 1;
+        active.failedItems = appendLimitedFailedItems(active.failedItems, [{ source: active.currentDir, target: targetDir, message: error?.message || "创建目标目录失败" }]);
+        active.currentDir = null;
+        processedThisRun += 1;
+        continue;
+      }
+
+      try {
+        const dirResult = await fileSystem.listDirectory(active.currentDir, userId, userType, { refresh: true });
+        active.entries = Array.isArray(dirResult?.items) ? dirResult.items : [];
+      } catch (error: any) {
+        if (isInvocationLimitError(error)) {
+          active.lastError = error?.message || String(error);
+          return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
+        }
+        active.failed += 1;
+        active.processed += 1;
+        active.failedItems = appendLimitedFailedItems(active.failedItems, [{ source: active.currentDir, target: targetDir, message: error?.message || "列出目录失败" }]);
+        active.currentDir = null;
+        active.entries = [];
+        processedThisRun += 1;
+        continue;
+      }
+    }
+
+    const entries = Array.isArray(active.entries) ? active.entries : [];
+    if (active.entryIndex >= entries.length) {
+      active.currentDir = null;
+      active.entries = [];
+      active.entryIndex = 0;
+      continue;
+    }
+
+    const entry = entries[active.entryIndex];
+    if (!entry?.path) {
+      active.entryIndex += 1;
+      continue;
+    }
+
+    const entryPath = entry.isDirectory ? normalizeDirectoryPath(entry.path) : String(entry.path);
+    if (!entryPath.startsWith(sourceBase)) {
+      active.entryIndex += 1;
+      continue;
+    }
+
+    const relativePath = entryPath.slice(sourceBase.length);
+    const targetPath = entry.isDirectory ? joinDirectoryPath(targetBase, relativePath) : `${targetBase}${relativePath}`.replace(/\/+/g, "/");
+
+    if (entry.isDirectory) {
+      active.stack = Array.isArray(active.stack) ? active.stack : [];
+      active.stack.push(entryPath);
+      active.entryIndex += 1;
+      continue;
+    }
+
+    try {
+      const result = await fileSystem.copyItem(entryPath, targetPath, userId, userType, {
+        ...options,
+        maxDirectoryCopyObjects: 1,
+      });
+      if (result?.status === "skipped" || result?.skipped === true) {
+        active.skipped += 1;
+      } else if (result?.status === "failed") {
+        active.failed += 1;
+        active.failedItems = appendLimitedFailedItems(active.failedItems, [{ source: entryPath, target: targetPath, message: result?.message || result?.error || "复制失败" }]);
+      } else {
+        active.success += 1;
+      }
+      active.processed += 1;
+      active.entryIndex += 1;
+      processedThisRun += 1;
+    } catch (error: any) {
+      if (isInvocationLimitError(error)) {
+        active.lastError = error?.message || error?.details?.cause || String(error);
+        return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
+      }
+      active.failed += 1;
+      active.processed += 1;
+      active.failedItems = appendLimitedFailedItems(active.failedItems, [{ source: entryPath, target: targetPath, message: error?.details?.cause || error?.message || "复制失败" }]);
+      active.entryIndex += 1;
+      processedThisRun += 1;
+    }
+  }
+
+  return { done: false, activeDirectory: active, maxEntries };
+}
+
 async function resolveDirectoryCopyChunkSize(fileSystem: any, payload: CopyTaskPayload): Promise<number> {
   if (payload.options?.maxDirectoryCopyObjects !== undefined) {
     return clampDirectoryCopyChunkSize(payload.options.maxDirectoryCopyObjects);
@@ -221,6 +382,10 @@ export class CopyTaskHandler implements TaskHandler {
         sameMount &&
         sameDriverType &&
         typeof sourceCtx?.driver?.copyDirectoryChunk === "function";
+      const canChunkCrossMountDirectory =
+        isDirectoryPathHint(item.sourcePath) &&
+        isDirectoryPathHint(item.targetPath) &&
+        !sameMount;
 
       if (canChunkDirectory) {
         const activeDirectory = checkpoint.activeDirectory || {
@@ -420,6 +585,93 @@ export class CopyTaskHandler implements TaskHandler {
           done: false,
           message: "directory chunk copied",
           invocationLimitReached: chunkResult?.invocationLimitReached === true,
+        };
+      }
+
+      if (canChunkCrossMountDirectory) {
+        const activeDirectory = checkpoint.activeDirectory || null;
+        const chunkResult = await executeCrossMountDirectoryChunk({
+          fileSystem,
+          item,
+          job,
+          userId: job.userId,
+          userType: job.userType,
+          activeDirectory,
+          configuredChunkSize: directoryCopyChunkSize,
+          options: payload.options,
+        });
+        const nextDirectory = chunkResult.activeDirectory || {};
+        const maxObjects = Number(chunkResult.maxEntries || 1);
+        const directoryProgress = buildDirectoryProgress(nextDirectory, maxObjects, currentIndex);
+        const observedTotal = Math.max(
+          Number(currentStats.totalItems || payload.items.length),
+          payload.items.length - 1 + Number(nextDirectory.processed || 0) + (chunkResult.done ? 0 : maxObjects),
+        );
+
+        itemResults[currentIndex].message = chunkResult.done
+          ? `跨存储目录复制完成：成功 ${Number(nextDirectory.success || 0)}，失败 ${Number(nextDirectory.failed || 0)}，跳过 ${Number(nextDirectory.skipped || 0)}`
+          : `跨存储目录复制进行中：成功 ${Number(nextDirectory.success || 0)}，失败 ${Number(nextDirectory.failed || 0)}，跳过 ${Number(nextDirectory.skipped || 0)}`;
+        itemResults[currentIndex].meta = {
+          ...(itemResults[currentIndex].meta || {}),
+          copyDetails: {
+            ...nextDirectory,
+            failedItems: Array.isArray(nextDirectory.failedItems) ? nextDirectory.failedItems.slice(0, 20) : [],
+          },
+        };
+
+        if (chunkResult.done) {
+          const detailSuccess = Number(nextDirectory.success || 0);
+          const detailFailed = Number(nextDirectory.failed || 0);
+          const detailSkipped = Number(nextDirectory.skipped || 0);
+          itemResults[currentIndex].status = detailFailed > 0 ? "failed" : "success";
+          itemResults[currentIndex].error = detailFailed > 0 ? nextDirectory.failedItems?.[0]?.message || `跨存储目录复制存在 ${detailFailed} 个失败项` : undefined;
+
+          await context.updateProgress(job.jobId, {
+            processedItems: baseProcessed + Math.max(1, detailSuccess + detailFailed + detailSkipped),
+            totalItems: Math.max(observedTotal, payload.items.length - 1 + detailSuccess + detailFailed + detailSkipped),
+            successCount: baseSuccess + detailSuccess,
+            failedCount: baseFailed + detailFailed,
+            skippedCount: baseSkipped + detailSkipped,
+            directoryProgress: {
+              ...directoryProgress,
+              totalObjects: Number(nextDirectory.processed || 0),
+            },
+            itemResults,
+            copyCheckpoint: {
+              currentIndex: currentIndex + 1,
+              startAfter: null,
+              countContinuationToken: null,
+              phase: "count",
+              activeDirectory: null,
+              initialized: true,
+            },
+          });
+
+          return { done: currentIndex + 1 >= payload.items.length, message: "cross mount directory item completed" };
+        }
+
+        await context.updateProgress(job.jobId, {
+          processedItems: baseProcessed + Number(nextDirectory.processed || 0),
+          totalItems: observedTotal,
+          successCount: baseSuccess + Number(nextDirectory.success || 0),
+          failedCount: baseFailed + Number(nextDirectory.failed || 0),
+          skippedCount: baseSkipped + Number(nextDirectory.skipped || 0),
+          directoryProgress,
+          itemResults,
+          copyCheckpoint: {
+            currentIndex,
+            startAfter: null,
+            countContinuationToken: null,
+            phase: "copy",
+            activeDirectory: nextDirectory,
+            initialized: true,
+          },
+        });
+
+        return {
+          done: false,
+          message: "cross mount directory chunk copied",
+          invocationLimitReached: chunkResult.invocationLimitReached === true,
         };
       }
 
