@@ -577,9 +577,10 @@ const prepareCopyItems = () => {
   return props.selectedItems.map((item) => {
     // 确保目标路径正确拼接，避免双斜杠
     const basePath = currentPath.value.endsWith('/') ? currentPath.value : currentPath.value + '/';
+    const targetPath = `${basePath}${item.name}`;
     return {
       sourcePath: item.path,
-      targetPath: `${basePath}${item.name}`,
+      targetPath: item.isDirectory && !targetPath.endsWith("/") ? `${targetPath}/` : targetPath,
     };
   });
 };

@@ -26,6 +26,20 @@ export default {
       expiresHint: "设置代理签名的过期时间，0表示永不过期",
       expiresUnit: "秒",
     },
+    copySettings: {
+      title: "批量复制设置",
+      description: "配置 Worker 环境下目录批量复制的分块大小",
+      directoryChunkSizeLabel: "目录复制单 chunk 对象数",
+      directoryChunkSizeHint: "默认 10，允许 1-100。这里是期望值；Worker 环境遇到子请求上限时会自动降档并续跑。",
+      itemsUnit: "个",
+    },
+    deleteSettings: {
+      title: "批量删除设置",
+      description: "配置 Worker 环境下目录批量删除的单批对象数量",
+      directoryChunkSizeLabel: "目录删除单批次对象数",
+      directoryChunkSizeHint: "默认 1000。S3/R2 批量删除接口单次最多支持 1000 个对象；如果仍遇到 Worker 限制可适当调小。",
+      itemsUnit: "个",
+    },
     buttons: {
       updateSettings: "更新设置",
       updating: "更新中...",

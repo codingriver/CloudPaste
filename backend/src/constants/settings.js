@@ -114,6 +114,28 @@ export const DEFAULT_SETTINGS = {
     default_value: "false",
   },
 
+  copy_directory_chunk_size: {
+    key: "copy_directory_chunk_size",
+    type: SETTING_TYPES.NUMBER,
+    group_id: SETTING_GROUPS.GLOBAL,
+    help: "Worker 环境下目录批量复制每个 Workflow step 期望处理的对象数量。默认 10，允许 1-100；运行时遇到 Worker 子请求上限会自动降档续跑。",
+    options: null,
+    sort_order: 6,
+    flag: SETTING_FLAGS.PUBLIC,
+    default_value: "10",
+  },
+
+  delete_directory_chunk_size: {
+    key: "delete_directory_chunk_size",
+    type: SETTING_TYPES.NUMBER,
+    group_id: SETTING_GROUPS.GLOBAL,
+    help: "Worker 环境下目录批量删除每个 Workflow step 处理的对象数量。S3/R2 批量删除接口单次最多 1000 个对象，默认 1000。",
+    options: null,
+    sort_order: 7,
+    flag: SETTING_FLAGS.PUBLIC,
+    default_value: "1000",
+  },
+
   // 预览设置组
   preview_text_types: {
     key: "preview_text_types",
@@ -403,6 +425,12 @@ export function validateSettingValue(key, value, type) {
       }
       if (key === "proxy_sign_expires") {
         return num >= 0; // 非负数
+      }
+      if (key === "copy_directory_chunk_size") {
+        return Number.isInteger(num) && num >= 1 && num <= 100;
+      }
+      if (key === "delete_directory_chunk_size") {
+        return Number.isInteger(num) && num >= 1 && num <= 1000;
       }
       return true;
 

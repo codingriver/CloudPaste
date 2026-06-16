@@ -19,6 +19,112 @@ const DOCKER_PROGRESS_INTERVAL_MS = 500;
 const PRESCAN_CONCURRENCY_WORKERS = 6;
 const PRESCAN_CONCURRENCY_DOCKER = 10;
 
+// Workers 单次 invocation 的子请求数量有限。目录复制在同存储 S3/R2 下会对每个对象发起 CopyObject，
+// 这里先用保守阈值让大目录返回 partial，避免耗尽配额后把真实错误包装成后续的源路径检查失败。
+const WORKERS_DIRECTORY_COPY_OBJECT_LIMIT = 10;
+const MAX_WORKERS_DIRECTORY_COPY_OBJECT_LIMIT = 100;
+const WORKERS_DIRECTORY_COPY_SAFE_OBJECT_LIMIT = 20;
+
+function isDirectoryPathHint(path: string | undefined): boolean {
+  return typeof path === "string" && path.endsWith("/");
+}
+
+function ensureCopyItemResults(payload: CopyTaskPayload, stats: TaskStats): ItemResult[] {
+  const current = Array.isArray(stats.itemResults) ? stats.itemResults : [];
+  return payload.items.map((item, index) => ({
+    sourcePath: item.sourcePath,
+    targetPath: item.targetPath,
+    status: current[index]?.status || "pending",
+    fileSize: current[index]?.fileSize || 0,
+    bytesTransferred: current[index]?.bytesTransferred || 0,
+    retryCount: current[index]?.retryCount,
+    error: current[index]?.error,
+    message: current[index]?.message,
+    meta: current[index]?.meta,
+  }));
+}
+
+function appendLimitedFailedItems(existing: any[] | undefined, next: any[] | undefined, limit = 20): any[] {
+  return [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(next) ? next : [])].slice(0, limit);
+}
+
+function summarizeTaskError(error: any): { message: string; cause?: string; stack?: string } {
+  const message = error?.message || String(error || "未知错误");
+  const cause = error?.details?.cause || error?.cause?.message || error?.cause || undefined;
+  const stack = typeof error?.stack === "string" ? error.stack.split("\n").slice(0, 2).join(" | ") : undefined;
+  return {
+    message,
+    cause: cause ? String(cause) : undefined,
+    stack,
+  };
+}
+
+function clampDirectoryCopyChunkSize(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return WORKERS_DIRECTORY_COPY_OBJECT_LIMIT;
+  }
+  return Math.min(Math.max(Math.floor(numeric), 1), MAX_WORKERS_DIRECTORY_COPY_OBJECT_LIMIT);
+}
+
+function getEffectiveDirectoryCopyChunkSize(configuredSize: number, activeDirectory?: Record<string, any> | null): number {
+  const configured = Math.max(1, Math.floor(Number(configuredSize) || WORKERS_DIRECTORY_COPY_OBJECT_LIMIT));
+  const limitHits = Math.max(0, Math.floor(Number(activeDirectory?.invocationLimitReachedCount || 0)));
+  let effective = Math.min(configured, WORKERS_DIRECTORY_COPY_SAFE_OBJECT_LIMIT);
+
+  for (let i = 0; i < limitHits; i += 1) {
+    effective = Math.max(1, Math.floor(effective / 2));
+  }
+
+  return Math.max(1, effective);
+}
+
+function buildDirectoryProgress(activeDirectory: Record<string, any>, chunkSize: number, currentIndex: number) {
+  const processedObjects = Number(activeDirectory.processed || 0);
+  const batchSize = Math.max(1, Number(chunkSize || 1));
+  const currentBatch = processedObjects > 0 ? Math.ceil(processedObjects / batchSize) : 1;
+  const knownTotal = Number(activeDirectory.totalObjects || activeDirectory.countedObjects || 0);
+  const estimatedTotal = Math.max(knownTotal, processedObjects);
+
+  return {
+    mode: "directory_copy",
+    phase: activeDirectory.phase || "copy",
+    currentItemIndex: currentIndex,
+    totalObjects: estimatedTotal,
+    processedObjects,
+    countedObjects: Number(activeDirectory.countedObjects || 0),
+    successObjects: Number(activeDirectory.success || 0) + Number(activeDirectory.deduped || 0),
+    failedObjects: Number(activeDirectory.failed || 0),
+    skippedObjects: Number(activeDirectory.skipped || 0),
+    dedupedObjects: Number(activeDirectory.deduped || 0),
+    batchSize,
+    currentBatch,
+    lastCompletedKey: activeDirectory.lastCompletedKey || null,
+    invocationLimitReachedCount: Number(activeDirectory.invocationLimitReachedCount || 0),
+  };
+}
+
+async function resolveDirectoryCopyChunkSize(fileSystem: any, payload: CopyTaskPayload): Promise<number> {
+  if (payload.options?.maxDirectoryCopyObjects !== undefined) {
+    return clampDirectoryCopyChunkSize(payload.options.maxDirectoryCopyObjects);
+  }
+
+  const db = fileSystem?.mountManager?.db;
+  if (db && typeof db.prepare === "function") {
+    try {
+      const row = await db
+        .prepare("SELECT value FROM system_settings WHERE key = ?")
+        .bind("copy_directory_chunk_size")
+        .first();
+      return clampDirectoryCopyChunkSize(row?.value);
+    } catch (error) {
+      console.warn("[CopyTaskHandler] 读取 copy_directory_chunk_size 设置失败，使用默认值", error);
+    }
+  }
+
+  return WORKERS_DIRECTORY_COPY_OBJECT_LIMIT;
+}
+
 /**
  * 复制任务处理器 - 支持同存储原子复制和跨存储流式复制
  * - 同存储: 驱动层原子复制 (S3 自动使用 CopyObject API)
@@ -53,6 +159,370 @@ export class CopyTaskHandler implements TaskHandler {
     }
   }
 
+  async executeChunk(job: InternalJob, context: ExecutionContext) {
+    const payload = job.payload as CopyTaskPayload;
+    const fileSystem = context.getFileSystem();
+    const directoryCopyChunkSize = await resolveDirectoryCopyChunkSize(fileSystem, payload);
+    const currentStats = context.getStats ? await context.getStats(job.jobId) : job.stats;
+    const itemResults = ensureCopyItemResults(payload, currentStats);
+    const checkpoint = (currentStats.copyCheckpoint || {}) as {
+      currentIndex?: number;
+      startAfter?: string | null;
+      countContinuationToken?: string | null;
+      phase?: "count" | "copy";
+      activeDirectory?: Record<string, any> | null;
+      initialized?: boolean;
+    };
+
+    if (!checkpoint.initialized) {
+      await context.updateProgress(job.jobId, {
+        totalItems: Math.max(Number(currentStats.totalItems || 0), payload.items.length),
+        itemResults,
+        copyCheckpoint: {
+          currentIndex: 0,
+          startAfter: null,
+          countContinuationToken: null,
+          phase: "count",
+          activeDirectory: null,
+          initialized: true,
+        },
+      });
+      return { done: false, message: "copy checkpoint initialized" };
+    }
+
+    let currentIndex = Number(checkpoint.currentIndex || 0);
+    while (currentIndex < payload.items.length && itemResults[currentIndex]?.status && ["success", "failed", "skipped"].includes(itemResults[currentIndex].status)) {
+      currentIndex++;
+    }
+
+    if (currentIndex >= payload.items.length) {
+      return { done: true, message: "copy completed" };
+    }
+
+    if (await context.isCancelled(job.jobId)) {
+      return { done: true, message: "copy cancelled" };
+    }
+
+    const item = payload.items[currentIndex];
+    itemResults[currentIndex].status = "processing";
+
+    const baseSuccess = Number(currentStats.successCount || 0);
+    const baseFailed = Number(currentStats.failedCount || 0);
+    const baseSkipped = Number(currentStats.skippedCount || 0);
+    const baseProcessed = Number(currentStats.processedItems || 0);
+
+    try {
+      const sourceCtx = await fileSystem.mountManager.getDriverByPath(item.sourcePath, job.userId, job.userType);
+      const targetCtx = await fileSystem.mountManager.getDriverByPath(item.targetPath, job.userId, job.userType);
+      const sameMount = sourceCtx?.mount?.id === targetCtx?.mount?.id;
+      const sameDriverType = sourceCtx?.driver?.getType?.() === targetCtx?.driver?.getType?.();
+      const canChunkDirectory =
+        isDirectoryPathHint(item.sourcePath) &&
+        isDirectoryPathHint(item.targetPath) &&
+        sameMount &&
+        sameDriverType &&
+        typeof sourceCtx?.driver?.copyDirectoryChunk === "function";
+
+      if (canChunkDirectory) {
+        const activeDirectory = checkpoint.activeDirectory || {
+          phase: "count",
+          success: 0,
+          failed: 0,
+          skipped: 0,
+          deduped: 0,
+          processed: 0,
+          countedObjects: 0,
+          totalObjects: 0,
+          failedItems: [],
+          invocationLimitReachedCount: 0,
+          lastCompletedKey: null,
+          lastError: null,
+        };
+        const maxObjects = getEffectiveDirectoryCopyChunkSize(directoryCopyChunkSize, activeDirectory);
+        console.log(
+          `[CopyTaskHandler] executeChunk directory item job=${job.jobId} index=${currentIndex} ` +
+            `source=${item.sourcePath} target=${item.targetPath} configuredMaxObjects=${directoryCopyChunkSize} ` +
+            `effectiveMaxObjects=${maxObjects} ` +
+            `startAfter=${checkpoint.startAfter || "null"}`
+        );
+
+        const phase = checkpoint.phase || activeDirectory.phase || "count";
+        const canCountDirectory = typeof sourceCtx?.driver?.countDirectoryChunk === "function";
+
+        if (phase === "count" && canCountDirectory) {
+          const countResult = await sourceCtx.driver.countDirectoryChunk(sourceCtx.subPath, {
+            mount: sourceCtx.mount,
+            subPath: sourceCtx.subPath,
+            path: item.sourcePath,
+            sourcePath: item.sourcePath,
+            db: fileSystem.mountManager?.db,
+            userIdOrInfo: job.userId,
+            userType: job.userType,
+            continuationToken: checkpoint.countContinuationToken || null,
+            maxPages: 5,
+          });
+
+          const countedObjects = Number(activeDirectory.countedObjects || 0) + Number(countResult?.count || 0);
+          const nextDirectory = {
+            ...activeDirectory,
+            phase: countResult?.done ? "copy" : "count",
+            countedObjects,
+            totalObjects: countedObjects,
+            countPages: Number(activeDirectory.countPages || 0) + Number(countResult?.pages || 0),
+            invocationLimitReachedCount:
+              Number(activeDirectory.invocationLimitReachedCount || 0) + (countResult?.invocationLimitReached === true ? 1 : 0),
+            lastError: countResult?.lastError || activeDirectory.lastError || null,
+            errorCause: countResult?.errorCause || activeDirectory.errorCause || null,
+            batchSize: maxObjects,
+          };
+
+          itemResults[currentIndex].message = countResult?.done
+            ? `目录对象统计完成：共 ${countedObjects} 个对象`
+            : `目录对象统计中：已统计 ${countedObjects} 个对象`;
+          itemResults[currentIndex].meta = {
+            ...(itemResults[currentIndex].meta || {}),
+            copyDetails: nextDirectory,
+          };
+
+          await context.updateProgress(job.jobId, {
+            totalItems: Math.max(Number(currentStats.totalItems || payload.items.length), payload.items.length - 1 + countedObjects),
+            processedItems: baseProcessed,
+            directoryProgress: buildDirectoryProgress(nextDirectory, maxObjects, currentIndex),
+            itemResults,
+            copyCheckpoint: {
+              currentIndex,
+              startAfter: null,
+              countContinuationToken: countResult?.done ? null : (countResult?.nextContinuationToken || checkpoint.countContinuationToken || null),
+              phase: countResult?.done ? "copy" : "count",
+              activeDirectory: countResult?.done
+                ? { ...nextDirectory, phase: "copy", processed: 0, success: 0, failed: 0, skipped: 0, deduped: 0, failedItems: [], lastCompletedKey: null }
+                : nextDirectory,
+              initialized: true,
+            },
+          });
+
+          return {
+            done: false,
+            message: countResult?.done ? "directory count completed" : "directory count chunk",
+            invocationLimitReached: countResult?.invocationLimitReached === true,
+          };
+        }
+
+        const chunkResult = await sourceCtx.driver.copyDirectoryChunk(sourceCtx.subPath, targetCtx.subPath, {
+          mount: sourceCtx.mount,
+          sourceSubPath: sourceCtx.subPath,
+          targetSubPath: targetCtx.subPath,
+          sourcePath: item.sourcePath,
+          targetPath: item.targetPath,
+          db: fileSystem.mountManager?.db,
+          userIdOrInfo: job.userId,
+          userType: job.userType,
+          skipExisting: payload.options?.skipExisting === true,
+          startAfter: checkpoint.startAfter || null,
+          maxObjects,
+          resumeMode: true,
+        });
+
+        console.log(
+          `[CopyTaskHandler] executeChunk directory result job=${job.jobId} index=${currentIndex} ` +
+            `done=${chunkResult?.done === true} success=${Number(chunkResult?.success || 0)} ` +
+            `skipped=${Number(chunkResult?.skipped || 0)} deduped=${Number(chunkResult?.deduped || 0)} ` +
+            `failed=${Number(chunkResult?.failed || 0)} processed=${Number(chunkResult?.processed || 0)} ` +
+            `nextStartAfter=${chunkResult?.nextStartAfter || "null"} lastCompletedKey=${chunkResult?.lastCompletedKey || "null"} ` +
+            `invocationLimitReached=${chunkResult?.invocationLimitReached === true} errorCause=${chunkResult?.errorCause || "null"}`
+        );
+
+        const nextDirectory = {
+          phase: "copy",
+          success: Number(activeDirectory.success || 0) + Number(chunkResult?.success || 0),
+          failed: Number(activeDirectory.failed || 0) + Number(chunkResult?.failed || 0),
+          skipped: Number(activeDirectory.skipped || 0) + Number(chunkResult?.skipped || 0),
+          deduped: Number(activeDirectory.deduped || 0) + Number(chunkResult?.deduped || 0),
+          processed: Number(activeDirectory.processed || 0) + Number(chunkResult?.processed || 0),
+          countedObjects: Number(activeDirectory.countedObjects || activeDirectory.totalObjects || 0),
+          totalObjects: Number(activeDirectory.totalObjects || activeDirectory.countedObjects || 0) > 0
+            ? Number(activeDirectory.totalObjects || activeDirectory.countedObjects || 0)
+            : Math.max(
+                Number(activeDirectory.totalObjects || 0),
+                Number(activeDirectory.processed || 0) + Number(chunkResult?.processed || 0) + (chunkResult?.done ? 0 : maxObjects),
+              ),
+          failedItems: appendLimitedFailedItems(activeDirectory.failedItems, chunkResult?.failedItems),
+          invocationLimitReachedCount:
+            Number(activeDirectory.invocationLimitReachedCount || 0) + (chunkResult?.invocationLimitReached === true ? 1 : 0),
+          lastCompletedKey: chunkResult?.lastCompletedKey || activeDirectory.lastCompletedKey || null,
+          lastError: chunkResult?.lastError || activeDirectory.lastError || null,
+          errorCause: chunkResult?.errorCause || activeDirectory.errorCause || null,
+          batchSize: maxObjects,
+          currentBatch: Math.max(1, Math.ceil((Number(activeDirectory.processed || 0) + Number(chunkResult?.processed || 0)) / Math.max(1, maxObjects))),
+        };
+        const directoryProgress = buildDirectoryProgress(nextDirectory, maxObjects, currentIndex);
+
+        const nextTotalItems = Math.max(Number(currentStats.totalItems || payload.items.length), payload.items.length - 1 + nextDirectory.totalObjects);
+
+        itemResults[currentIndex].message = chunkResult?.done
+          ? `目录复制完成：成功 ${nextDirectory.success}，失败 ${nextDirectory.failed}，跳过 ${nextDirectory.skipped}，已存在 ${nextDirectory.deduped}`
+          : `目录复制进行中：成功 ${nextDirectory.success}，失败 ${nextDirectory.failed}，跳过 ${nextDirectory.skipped}，已存在 ${nextDirectory.deduped}`;
+        itemResults[currentIndex].meta = {
+          ...(itemResults[currentIndex].meta || {}),
+          copyDetails: nextDirectory,
+        };
+
+        if (chunkResult?.done) {
+          const itemFailed = nextDirectory.failed > 0;
+          itemResults[currentIndex].status = itemFailed ? "failed" : (chunkResult?.skippedRoot ? "skipped" : "success");
+          if (itemFailed) {
+            itemResults[currentIndex].error = `目录复制存在 ${nextDirectory.failed} 个失败项`;
+          }
+
+          await context.updateProgress(job.jobId, {
+            totalItems: nextTotalItems,
+            processedItems: baseProcessed + 1,
+            successCount: baseSuccess + Number(chunkResult?.success || 0) + Number(chunkResult?.deduped || 0),
+            failedCount: baseFailed + Number(chunkResult?.failed || 0),
+            skippedCount: baseSkipped + Number(chunkResult?.skipped || 0),
+            directoryProgress: {
+              ...directoryProgress,
+              totalObjects: Number(nextDirectory.totalObjects || nextDirectory.countedObjects || nextDirectory.processed),
+              currentBatch: Math.max(1, Math.ceil(nextDirectory.processed / Math.max(1, maxObjects))),
+            },
+            itemResults,
+            copyCheckpoint: {
+              currentIndex: currentIndex + 1,
+              startAfter: null,
+              countContinuationToken: null,
+              phase: "count",
+              activeDirectory: null,
+              initialized: true,
+            },
+          });
+
+          return { done: currentIndex + 1 >= payload.items.length, message: "directory item completed" };
+        }
+
+        await context.updateProgress(job.jobId, {
+          totalItems: nextTotalItems,
+          processedItems: baseProcessed,
+          successCount: baseSuccess + Number(chunkResult?.success || 0) + Number(chunkResult?.deduped || 0),
+          failedCount: baseFailed + Number(chunkResult?.failed || 0),
+          skippedCount: baseSkipped + Number(chunkResult?.skipped || 0),
+          directoryProgress,
+          itemResults,
+          copyCheckpoint: {
+            currentIndex,
+            startAfter: chunkResult?.lastCompletedKey || chunkResult?.nextStartAfter || checkpoint.startAfter || null,
+            countContinuationToken: null,
+            phase: "copy",
+            activeDirectory: nextDirectory,
+            initialized: true,
+          },
+        });
+
+        return {
+          done: false,
+          message: "directory chunk copied",
+          invocationLimitReached: chunkResult?.invocationLimitReached === true,
+        };
+      }
+
+      const copyResult = await fileSystem.copyItem(item.sourcePath, item.targetPath, job.userId, job.userType, {
+        ...payload.options,
+        maxDirectoryCopyObjects: directoryCopyChunkSize,
+      });
+
+      const resultStatus = (copyResult?.status as string) || "success";
+      if (resultStatus === "skipped" || copyResult?.skipped === true) {
+        itemResults[currentIndex].status = "skipped";
+        itemResults[currentIndex].message = copyResult?.message || "已跳过";
+        await context.updateProgress(job.jobId, {
+          processedItems: baseProcessed + 1,
+          successCount: baseSuccess,
+          failedCount: baseFailed,
+          skippedCount: baseSkipped + 1,
+          itemResults,
+          copyCheckpoint: { currentIndex: currentIndex + 1, startAfter: null, activeDirectory: null, initialized: true },
+        });
+      } else if (resultStatus === "failed") {
+        itemResults[currentIndex].status = "failed";
+        itemResults[currentIndex].error = copyResult?.message || copyResult?.error || "复制失败";
+        await context.updateProgress(job.jobId, {
+          processedItems: baseProcessed + 1,
+          successCount: baseSuccess,
+          failedCount: baseFailed + 1,
+          skippedCount: baseSkipped,
+          itemResults,
+          copyCheckpoint: { currentIndex: currentIndex + 1, startAfter: null, activeDirectory: null, initialized: true },
+        });
+      } else if (resultStatus === "partial") {
+        const details = copyResult?.details || {};
+        const detailSuccess = Number(details?.success || 0);
+        const detailFailed = Number(details?.failed || 0);
+        const detailSkipped = Number(details?.skipped || 0);
+        itemResults[currentIndex].status = detailFailed > 0 ? "failed" : "success";
+        itemResults[currentIndex].message = copyResult?.message || "部分完成";
+        itemResults[currentIndex].error = detailFailed > 0 ? `复制存在 ${detailFailed} 个失败项` : undefined;
+        itemResults[currentIndex].meta = {
+          ...(itemResults[currentIndex].meta || {}),
+          copyDetails: details,
+        };
+        await context.updateProgress(job.jobId, {
+          processedItems: baseProcessed + detailSuccess + detailFailed + detailSkipped,
+          totalItems: Math.max(Number(currentStats.totalItems || payload.items.length), payload.items.length - 1 + detailSuccess + detailFailed + detailSkipped),
+          successCount: baseSuccess + detailSuccess,
+          failedCount: baseFailed + detailFailed,
+          skippedCount: baseSkipped + detailSkipped,
+          itemResults,
+          copyCheckpoint: { currentIndex: currentIndex + 1, startAfter: null, activeDirectory: null, initialized: true },
+        });
+      } else {
+        itemResults[currentIndex].status = "success";
+        itemResults[currentIndex].message = copyResult?.message || "复制成功";
+        await context.updateProgress(job.jobId, {
+          processedItems: baseProcessed + 1,
+          successCount: baseSuccess + 1,
+          failedCount: baseFailed,
+          skippedCount: baseSkipped,
+          itemResults,
+          copyCheckpoint: { currentIndex: currentIndex + 1, startAfter: null, activeDirectory: null, initialized: true },
+        });
+      }
+
+      return { done: currentIndex + 1 >= payload.items.length, message: "file item copied" };
+    } catch (error: any) {
+      console.error(
+        `[CopyTaskHandler] executeChunk failed job=${job.jobId} index=${currentIndex} ` +
+          `source=${item.sourcePath} target=${item.targetPath}`,
+        error
+      );
+      const canRetry = isRetryableError(error);
+      if (canRetry) {
+        throw error;
+      }
+
+      const errorSummary = summarizeTaskError(error);
+      const causeText = errorSummary.cause && errorSummary.cause !== errorSummary.message ? `；原因：${errorSummary.cause}` : "";
+      itemResults[currentIndex].status = "failed";
+      itemResults[currentIndex].error = `${errorSummary.message}${causeText} [不可重试错误]`;
+      itemResults[currentIndex].meta = {
+        ...(itemResults[currentIndex].meta || {}),
+        lastError: errorSummary,
+      };
+      await context.updateProgress(job.jobId, {
+        processedItems: baseProcessed + 1,
+        successCount: baseSuccess,
+        failedCount: baseFailed + 1,
+        skippedCount: baseSkipped,
+        itemResults,
+        copyCheckpoint: {
+          currentIndex: currentIndex + 1,
+          startAfter: null,
+          activeDirectory: null,
+          initialized: true,
+        },
+      });
+      return { done: currentIndex + 1 >= payload.items.length, message: "item failed" };
+    }
+  }
+
   /** 执行复制任务 - 预扫描文件大小 → 逐项复制 + 支持重试和取消 */
   async execute(job: InternalJob, context: ExecutionContext): Promise<void> {
     const payload = job.payload as CopyTaskPayload;
@@ -62,11 +532,16 @@ export class CopyTaskHandler implements TaskHandler {
     // 只有在 Workers 环境下才开启进度上报节流，Docker 部署仍保持细粒度进度反馈
     const env = typeof context.getEnv === "function" ? context.getEnv() : null;
     const isWorkersEnv = !!env && (Object.prototype.hasOwnProperty.call(env, "DB") || Object.prototype.hasOwnProperty.call(env, "JOB_WORKFLOW"));
+    const resolvedDirectoryCopyChunkSize = await resolveDirectoryCopyChunkSize(fileSystem, payload);
+    const directoryCopyObjectLimit = isWorkersEnv
+      ? resolvedDirectoryCopyChunkSize
+      : payload.options?.maxDirectoryCopyObjects;
 
     let successCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
     let totalBytesTransferred = 0; // 累计已传输字节
+    let totalItemsObserved = payload.items.length;
 
     console.log(`[CopyTaskHandler] 开始执行作业 ${job.jobId}, 共 ${payload.items.length} 项`);
 
@@ -157,6 +632,8 @@ export class CopyTaskHandler implements TaskHandler {
       let lastError: Error | null = null;
       let fileSuccess = false;
       let fileSkipped = false;
+      let filePartial = false;
+      let fileSuccessIncrement = 1;
       let currentFileBytes = 0;
 
       for (let attempt = 0; attempt <= retryPolicy.limit; attempt++) {
@@ -186,6 +663,7 @@ export class CopyTaskHandler implements TaskHandler {
           // 调用 FileSystem.copyItem() - 自动选择同存储原子复制或跨存储流式复制
           const copyResult = await fileSystem.copyItem(item.sourcePath, item.targetPath, job.userId, job.userType, {
             ...payload.options,
+            maxDirectoryCopyObjects: directoryCopyObjectLimit,
             onProgress: (bytesTransferred: number) => {
               currentFileBytes = bytesTransferred;
               itemResults[i].bytesTransferred = bytesTransferred;
@@ -223,6 +701,11 @@ export class CopyTaskHandler implements TaskHandler {
 
           const resultStatus = (copyResult?.status as string) || "success";
           const isSkipped = resultStatus === "skipped" || copyResult?.skipped === true;
+          const copyDetails = copyResult?.details || null;
+          const detailSuccess = Number(copyDetails?.success || 0);
+          const detailFailed = Number(copyDetails?.failed || 0);
+          const detailSkipped = Number(copyDetails?.skipped || 0);
+          const detailTotal = Number(copyDetails?.total || (detailSuccess + detailFailed + detailSkipped) || 0);
 
           if (isSkipped) {
             // 驱动显式表示跳过：不计入失败，但标记为 skipped
@@ -241,6 +724,31 @@ export class CopyTaskHandler implements TaskHandler {
             // 驱动显式表示失败：抛出错误触发重试/失败分支，并保留 message 供上层使用
             const reason = copyResult?.message || copyResult?.error || "复制失败";
             throw new Error(reason);
+          } else if (resultStatus === "partial") {
+            // 目录递归内部部分成功：记录明细，最终任务应显示为 partial
+            const summary = copyResult?.message || `部分完成：成功 ${detailSuccess}，失败 ${detailFailed}，跳过 ${detailSkipped}`;
+            itemResults[i].message = String(summary);
+            itemResults[i].error = detailFailed > 0 ? `递归复制存在 ${detailFailed} 个失败项` : undefined;
+            itemResults[i].bytesTransferred = copyResult?.contentLength || currentFileBytes || 0;
+            itemResults[i].meta = {
+              ...(itemResults[i].meta || {}),
+              copyDetails,
+            };
+
+            if (detailTotal > 0) {
+              totalItemsObserved += Math.max(0, detailTotal - 1);
+            }
+
+            totalBytesTransferred += copyResult?.contentLength || currentFileBytes || 0;
+            fileSuccess = detailSuccess > 0 || detailSkipped > 0;
+            filePartial = true;
+            if (detailFailed > 0) {
+              failedCount += detailFailed;
+            }
+            if (detailSkipped > 0) {
+              skippedCount += detailSkipped;
+            }
+            fileSuccessIncrement = Math.max(0, detailSuccess);
           } else {
             // 视为成功：累计字节数并记录传输进度
             const fileBytes = copyResult?.contentLength || currentFileBytes || 0;
@@ -260,9 +768,13 @@ export class CopyTaskHandler implements TaskHandler {
           if (!canRetry || !hasMoreRetries) {
             const retryInfo = attempt > 0 ? ` (已重试 ${attempt}/${retryPolicy.limit} 次)` : "";
             const retryableInfo = !canRetry ? " [不可重试错误]" : "";
+            const causeInfo =
+              error?.details?.cause && error.details.cause !== error.message
+                ? `；原因：${error.details.cause}`
+                : "";
 
             itemResults[i].status = "failed";
-            itemResults[i].error = `${error.message || String(error)}${retryInfo}${retryableInfo}`;
+            itemResults[i].error = `${error.message || String(error)}${causeInfo}${retryInfo}${retryableInfo}`;
             itemResults[i].retryCount = attempt;
 
             console.error(
@@ -285,9 +797,12 @@ export class CopyTaskHandler implements TaskHandler {
         itemResults[i].status = "skipped";
         itemResults[i].bytesTransferred = 0;
         skippedCount++;
+      } else if (filePartial) {
+        itemResults[i].status = "failed";
+        successCount += fileSuccessIncrement;
       } else if (fileSuccess) {
         itemResults[i].status = "success";
-        successCount++;
+        successCount += fileSuccessIncrement;
         const retryCount = itemResults[i].retryCount;
         if (retryCount !== undefined && retryCount > 0) {
           console.log(`[CopyTaskHandler] ✓ 复制成功 (经 ${retryCount} 次重试) ${item.sourcePath}`);
@@ -299,6 +814,7 @@ export class CopyTaskHandler implements TaskHandler {
       // 更新进度
       await context.updateProgress(job.jobId, {
         processedItems: successCount + failedCount + skippedCount,
+        totalItems: totalItemsObserved,
         successCount,
         failedCount,
         skippedCount,

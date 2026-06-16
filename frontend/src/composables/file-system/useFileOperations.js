@@ -147,11 +147,23 @@ export function useFileOperations() {
       error.value = null;
 
       const paths = items.map((item) => item.path);
-      await fsService.batchDeleteItems(paths);
+      const result = await fsService.batchDeleteItems(paths);
+      const raw = result?.raw || {};
+      const status = result?.status || raw?.status || "success";
+      const failed = Array.isArray(raw?.failed) ? raw.failed : [];
+      const successCount = Number(raw?.success || 0);
 
       return {
-        success: true,
-        message: t("mount.messages.batchDeleteSuccess", { count: items.length }),
+        success: status !== "failed",
+        status,
+        raw,
+        failed,
+        deletedPaths: paths.filter((path) => !failed.some((item) => item?.path === path)),
+        message:
+          result?.message ||
+          (status === "partial"
+            ? t("mount.messages.batchDeletePartial", { success: successCount, failed: failed.length })
+            : t("mount.messages.batchDeleteSuccess", { count: items.length })),
       };
     } catch (err) {
       log.error("批量删除失败:", err);

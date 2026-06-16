@@ -4,6 +4,44 @@
  */
 
 import { ApiStatus } from "../../../../constants/index.js";
+
+const DEFAULT_DIRECTORY_COPY_MAX_KEYS = 1000;
+const DEFAULT_DIRECTORY_COPY_CHUNK_OBJECTS = 10;
+const MAX_DIRECTORY_COPY_CHUNK_OBJECTS = 100;
+const DEFAULT_DIRECTORY_DELETE_CHUNK_OBJECTS = 1000;
+const MAX_DIRECTORY_DELETE_CHUNK_OBJECTS = 1000;
+
+function normalizePositiveInteger(value, fallback = null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback;
+  }
+  return Math.floor(numeric);
+}
+
+function isWorkerInvocationLimitError(error) {
+  const message = String(error?.message || error?.details?.cause || error || "").toUpperCase();
+  return (
+    message.includes("TOO MANY SUBREQUESTS BY SINGLE WORKER INVOCATION") ||
+    message.includes("TOO MANY API REQUESTS BY SINGLE WORKER INVOCATION") ||
+    message.includes("SUBREQUESTS BY SINGLE WORKER INVOCATION")
+  );
+}
+
+function summarizeErrorCause(error) {
+  const cause =
+    error?.details?.cause ||
+    error?.cause?.message ||
+    error?.message ||
+    String(error || "");
+  const stackLine = typeof error?.stack === "string" ? error.stack.split("\n").slice(0, 2).join(" | ") : "";
+  return {
+    message: error?.message || String(error || "未知错误"),
+    cause: String(cause || "未知错误"),
+    stack: stackLine,
+  };
+}
+
 /**
  * 模块说明：
  * - 作用域：单一 S3 挂载内的批量删除、复制、伪原子重命名，以及目录层级元数据维护。
@@ -11,7 +49,7 @@ import { ApiStatus } from "../../../../constants/index.js";
  * - 错误：统一经 S3DriverError / handleFsError 封装，尽量不直接抛出底层 SDK 原始错误。
  */
 import { AppError, ValidationError, NotFoundError, ConflictError, AuthenticationError, AuthorizationError, S3DriverError } from "../../../../http/errors.js";
-import { S3Client, DeleteObjectCommand, CopyObjectCommand, ListObjectsV2Command, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectCommand, DeleteObjectsCommand, CopyObjectCommand, ListObjectsV2Command, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { applyS3RootPrefix, normalizeS3SubPath } from "../utils/S3PathUtils.js";
 import { updateMountLastUsed } from "../../../fs/utils/MountResolver.js";
 import { checkDirectoryExists, updateParentDirectoriesModifiedTime } from "../utils/S3DirectoryUtils.js";
@@ -56,10 +94,48 @@ export class S3BatchOperations {
    * @param {string} bucketName - 存储桶名称
    * @param {string} prefix - 目录前缀
    * @param {string} storageConfigId - 存储配置ID
-   * @returns {Promise<void>}
+   * @returns {Promise<{success:number,failed:number,failedItems:Array<{key:string,error:string}>}>}
    */
   async deleteDirectoryRecursive(s3Client, bucketName, prefix, storageConfigId) {
     let continuationToken = undefined;
+    const result = {
+      success: 0,
+      failed: 0,
+      failedItems: [],
+      verificationDeleted: 0,
+    };
+
+    const deleteObjects = async (objects, phase = "main") => {
+      if (!Array.isArray(objects) || objects.length === 0) {
+        return;
+      }
+
+      const deleteCommand = new DeleteObjectsCommand({
+        Bucket: bucketName,
+        Delete: {
+          Objects: objects,
+          Quiet: false,
+        },
+      });
+      const deleteResponse = await s3Client.send(deleteCommand);
+      const errors = Array.isArray(deleteResponse?.Errors) ? deleteResponse.Errors : [];
+      const failedKeys = new Set(errors.map((item) => item?.Key).filter(Boolean));
+      const successCount = objects.length - failedKeys.size;
+
+      result.success += successCount;
+      result.failed += failedKeys.size;
+      if (phase === "verification") {
+        result.verificationDeleted += successCount;
+      }
+
+      for (const item of errors) {
+        if (result.failedItems.length >= 20) break;
+        result.failedItems.push({
+          key: item?.Key || "",
+          error: item?.Message || item?.Code || "删除失败",
+        });
+      }
+    };
 
     try {
       do {
@@ -74,26 +150,43 @@ export class S3BatchOperations {
         const response = await s3Client.send(listCommand);
 
         if (response.Contents && response.Contents.length > 0) {
-          // 批量删除对象
-          const deletePromises = response.Contents.map(async (item) => {
-            const deleteParams = {
-              Bucket: bucketName,
-              Key: item.Key,
-            };
+          const objects = response.Contents
+            .map((item) => item?.Key)
+            .filter(Boolean)
+            .map((Key) => ({ Key }));
 
-            const deleteCommand = new DeleteObjectCommand(deleteParams);
-            await s3Client.send(deleteCommand);
-
-            // 文件删除完成，无需数据库操作
-          });
-
-          await Promise.all(deletePromises);
+          await deleteObjects(objects);
         }
 
         continuationToken = response.NextContinuationToken;
       } while (continuationToken);
 
-      console.log(`成功删除目录: ${prefix}`);
+      // 最小兜底：边分页边删除可能改变对象集合。主循环结束后再扫一轮 prefix，
+      // 如果发现残留对象，再做一次删除 pass，降低分页变化或并发写入造成的残留概率。
+      let verificationToken = undefined;
+      do {
+        const verifyCommand = new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: prefix,
+          MaxKeys: 1000,
+          ContinuationToken: verificationToken,
+        });
+        const verifyResponse = await s3Client.send(verifyCommand);
+        const objects = (verifyResponse.Contents || [])
+          .map((item) => item?.Key)
+          .filter(Boolean)
+          .map((Key) => ({ Key }));
+
+        await deleteObjects(objects, "verification");
+        verificationToken = verifyResponse.NextContinuationToken;
+      } while (verificationToken);
+
+      if (result.failed > 0) {
+        console.warn(`目录删除部分失败: ${prefix}, 成功=${result.success}, 失败=${result.failed}`);
+      } else {
+        console.log(`成功删除目录: ${prefix}, 删除对象=${result.success}`);
+      }
+      return result;
     } catch (error) {
       console.error(`删除目录失败: ${error.message}`);
       throw error;
@@ -130,7 +223,15 @@ export class S3BatchOperations {
         const fullKey = applyS3RootPrefix(this.config, s3SubPath);
 
         if (isDir) {
-          await this.deleteDirectoryRecursive(this.s3Client, this.config.bucket_name, fullKey, mount?.storage_config_id || null);
+          const deleteDetails = await this.deleteDirectoryRecursive(this.s3Client, this.config.bucket_name, fullKey, mount?.storage_config_id || null);
+          if (deleteDetails.failed > 0) {
+            result.failed.push({
+              path: fsPath,
+              error: `目录删除部分失败：成功 ${deleteDetails.success}，失败 ${deleteDetails.failed}`,
+              details: deleteDetails,
+            });
+            continue;
+          }
         } else {
           try {
             const deleteCommand = new DeleteObjectCommand({
@@ -173,7 +274,7 @@ export class S3BatchOperations {
     const { mount, db } = ctx;
     const sourcePath = ctx?.sourcePath;
     const targetPath = ctx?.targetPath;
-    const { skipExisting = false, _skipExistingChecked = false } = ctx;
+    const { skipExisting = false, _skipExistingChecked = false, maxDirectoryCopyObjects } = ctx;
 
     return handleFsError(
       async () => {
@@ -190,6 +291,7 @@ export class S3BatchOperations {
         const result = await this._handleSameStorageCopy(sourcePath, targetPath, sourceSubPath, targetSubPath, {
           skipExisting,
           _skipExistingChecked,
+          maxDirectoryCopyObjects,
         });
 
         if (db && mount?.id) {
@@ -211,7 +313,7 @@ export class S3BatchOperations {
    * @param {boolean} [copyOptions._skipExistingChecked=false] - 入口层是否已检查
    */
   async _handleSameStorageCopy(sourcePath, targetPath, sourceSubPath, targetSubPath, copyOptions = {}) {
-    const { skipExisting = false, _skipExistingChecked = false } = copyOptions;
+    const { skipExisting = false, _skipExistingChecked = false, maxDirectoryCopyObjects } = copyOptions;
 
     // subPath-only：同一个 driver 内的复制只使用当前实例的配置（不再从 DB 重新解析挂载点/配置）
     const s3Config = this.config;
@@ -247,7 +349,7 @@ export class S3BatchOperations {
 
     if (isDirectory) {
       // 目录复制（目录中每个文件需要单独检查，不传递 _skipExistingChecked）
-      return await this._copyDirectory(s3Config, fullS3SourcePath, fullS3TargetPath, sourcePath, targetPath, null, { skipExisting });
+      return await this._copyDirectory(s3Config, fullS3SourcePath, fullS3TargetPath, sourcePath, targetPath, null, { skipExisting, maxDirectoryCopyObjects });
     } else {
       // 文件复制（传递 _skipExistingChecked 避免重复检查）
       return await this._copyFile(s3Config, fullS3SourcePath, fullS3TargetPath, sourcePath, targetPath, null, { skipExisting, _skipExistingChecked });
@@ -341,14 +443,24 @@ export class S3BatchOperations {
    * @param {string} sourcePrefix - 源目录前缀
    * @param {string} targetPrefix - 目标目录前缀
    * @param {boolean} skipExisting - 是否跳过已存在的文件
+   * @param {Object} options - 控制选项
+   * @param {number|null} [options.maxObjects] - 本次调用最多处理的对象数，超出后返回 incomplete
    * @returns {Promise<Object>} 复制结果
    */
-  async copyDirectoryRecursive(s3Client, bucketName, sourcePrefix, targetPrefix, skipExisting = true) {
+  async copyDirectoryRecursive(s3Client, bucketName, sourcePrefix, targetPrefix, skipExisting = true, options = {}) {
     let continuationToken = undefined;
+    const maxObjects = normalizePositiveInteger(options?.maxObjects, null);
     const result = {
       success: 0,
       skipped: 0,
       failed: 0,
+      failedItems: [],
+      incomplete: false,
+      reason: null,
+      nextContinuationToken: null,
+      nextStartAfter: null,
+      lastProcessedKey: null,
+      processedObjects: 0,
     };
 
     try {
@@ -365,8 +477,19 @@ export class S3BatchOperations {
 
         if (response.Contents && response.Contents.length > 0) {
           for (const item of response.Contents) {
+            if (maxObjects !== null && result.processedObjects >= maxObjects) {
+              result.incomplete = true;
+              result.reason = "directory_copy_object_limit";
+              result.nextContinuationToken = continuationToken || response.NextContinuationToken || null;
+              result.nextStartAfter = result.lastProcessedKey || null;
+              break;
+            }
+
+            result.processedObjects++;
+
             try {
               const sourceKey = item.Key;
+              result.lastProcessedKey = sourceKey;
               const relativePath = sourceKey.substring(sourcePrefix.length);
               const targetKey = targetPrefix + relativePath;
 
@@ -408,8 +531,19 @@ export class S3BatchOperations {
             } catch (error) {
               console.error(`复制文件失败 ${item.Key}:`, error);
               result.failed++;
+              if (result.failedItems.length < 20) {
+                result.failedItems.push({
+                  source: item.Key,
+                  target: targetPrefix + String(item.Key || "").substring(sourcePrefix.length),
+                  error: error?.message || String(error) || "复制失败",
+                });
+              }
             }
           }
+        }
+
+        if (result.incomplete) {
+          break;
         }
 
         continuationToken = response.NextContinuationToken;
@@ -429,6 +563,7 @@ export class S3BatchOperations {
   async _copyDirectory(s3Config, s3SourcePath, s3TargetPath, sourcePath, targetPath, db = null, copyOptions = {}) {
     void db;
     const { skipExisting = false } = copyOptions;
+    const maxDirectoryCopyObjects = normalizePositiveInteger(copyOptions?.maxDirectoryCopyObjects, null);
 
     // 目录复制：统一用 “以 / 结尾的 prefix” 进行 S3 操作（返回值仍保持 FS 传入的 sourcePath/targetPath）
     const normalizedS3SourcePath = s3SourcePath.endsWith("/") ? s3SourcePath : s3SourcePath + "/";
@@ -469,14 +604,33 @@ export class S3BatchOperations {
       normalizedS3SourcePath,
       normalizedS3TargetPath,
       false,
+      {
+        maxObjects: maxDirectoryCopyObjects,
+      },
     );
+
+    const failed = Number(details?.failed || 0);
+    const success = Number(details?.success || 0);
+    const skipped = Number(details?.skipped || 0);
+    const total = success + skipped + failed;
+    const incomplete = details?.incomplete === true;
+    const hasPartialSuccess = success > 0 || skipped > 0;
+    const status = incomplete || failed > 0 ? (hasPartialSuccess ? "partial" : "failed") : "success";
+    const message =
+      status === "success" ? "目录复制成功" :
+      incomplete ? `目录复制已暂停：本次成功 ${success}，失败 ${failed}，跳过 ${skipped}，已达到单次处理上限 ${maxDirectoryCopyObjects || DEFAULT_DIRECTORY_COPY_MAX_KEYS}，需要分批续跑` :
+      status === "partial" ? `目录复制部分成功：成功 ${success}，失败 ${failed}，跳过 ${skipped}` :
+      `目录复制失败：成功 ${success}，失败 ${failed}，跳过 ${skipped}`;
 
     return {
       source: sourcePath,
       target: targetPath,
-      status: "success",
-      message: "目录复制成功",
-      details,
+      status,
+      message,
+      details: {
+        ...details,
+        total,
+      },
     };
   }
 
@@ -697,7 +851,443 @@ export class S3BatchOperations {
 
     return { baseName, extension, directory };
   }
+  /**
+   * 复制 S3 目录的一个可续跑块。
+   * 使用 StartAfter 保存最后处理 key，避免一页中途停止后重复整页。
+   */
+  async copyDirectoryChunk(sourceSubPath, targetSubPath, ctx = {}) {
+    const sourcePath = ctx?.sourcePath;
+    const targetPath = ctx?.targetPath;
+    const requestedMaxObjects = normalizePositiveInteger(ctx?.maxObjects, DEFAULT_DIRECTORY_COPY_CHUNK_OBJECTS);
+    const maxObjects = Math.min(requestedMaxObjects, MAX_DIRECTORY_COPY_CHUNK_OBJECTS);
+    const startAfter = typeof ctx?.startAfter === "string" && ctx.startAfter ? ctx.startAfter : null;
+    const skipExisting = !!ctx?.skipExisting;
+    const resumeMode = ctx?.resumeMode === true;
 
+    if (typeof sourcePath !== "string" || typeof targetPath !== "string") {
+      throw new ValidationError("S3 copyDirectoryChunk 需要 ctx.sourcePath/ctx.targetPath");
+    }
+    if (!isDirectoryPath(sourcePath) || !isDirectoryPath(targetPath)) {
+      throw new ValidationError("copyDirectoryChunk 仅支持目录路径");
+    }
 
+    const s3Config = this.config;
+    const sourcePrefix = applyS3RootPrefix(s3Config, normalizeS3SubPath(sourceSubPath, true));
+    const targetPrefix = applyS3RootPrefix(s3Config, normalizeS3SubPath(targetSubPath, true));
+    const normalizedSourcePrefix = sourcePrefix.endsWith("/") ? sourcePrefix : `${sourcePrefix}/`;
+    const normalizedTargetPrefix = targetPrefix.endsWith("/") ? targetPrefix : `${targetPrefix}/`;
 
+    console.log(
+      `[S3BatchOps] copyDirectoryChunk start source=${sourcePath} target=${targetPath} ` +
+        `maxObjects=${maxObjects} startAfter=${startAfter || "null"} skipExisting=${skipExisting} resumeMode=${resumeMode}`
+    );
+
+    if (!startAfter) {
+      const sourceExists = await checkDirectoryExists(this.s3Client, s3Config.bucket_name, normalizedSourcePrefix);
+      if (!sourceExists) {
+        throw new NotFoundError("源路径不存在或为空目录");
+      }
+
+      if (skipExisting && !resumeMode) {
+        const targetExists = await checkDirectoryExists(this.s3Client, s3Config.bucket_name, normalizedTargetPrefix);
+        if (targetExists) {
+          return {
+            done: true,
+            status: "skipped",
+            skippedRoot: true,
+            success: 0,
+            skipped: 1,
+            failed: 0,
+            processed: 0,
+            message: "目标目录已存在，跳过复制",
+          };
+        }
+      }
+    }
+
+    const result = {
+      done: false,
+      status: "running",
+      success: 0,
+      skipped: 0,
+      failed: 0,
+      deduped: 0,
+      processed: 0,
+      failedItems: [],
+      nextStartAfter: startAfter,
+      lastProcessedKey: startAfter,
+      lastCompletedKey: startAfter,
+      invocationLimitReached: false,
+      errorCause: null,
+      lastError: null,
+      hasMore: false,
+    };
+
+    let response;
+    try {
+      const listMaxKeys = Math.min(1000, Math.max(maxObjects + 1, 1));
+      response = await this.s3Client.send(new ListObjectsV2Command({
+        Bucket: s3Config.bucket_name,
+        Prefix: normalizedSourcePrefix,
+        MaxKeys: listMaxKeys,
+        ...(startAfter ? { StartAfter: startAfter } : {}),
+      }));
+    } catch (error) {
+      if (isWorkerInvocationLimitError(error)) {
+        const errorSummary = summarizeErrorCause(error);
+        result.hasMore = true;
+        result.done = false;
+        result.status = "running";
+        result.invocationLimitReached = true;
+        result.errorCause = errorSummary.cause;
+        result.lastError = errorSummary;
+        result.nextStartAfter = result.lastCompletedKey || startAfter || null;
+        console.warn(
+          `[S3BatchOps] copyDirectoryChunk list invocation limit source=${sourcePath} target=${targetPath} ` +
+            `lastCompletedKey=${result.lastCompletedKey || "null"} cause=${errorSummary.cause}`
+        );
+        return result;
+      }
+      throw error;
+    }
+
+    const contents = Array.isArray(response?.Contents) ? response.Contents : [];
+    const hasPrefetchedMore = contents.length > maxObjects;
+    const contentsToProcess = hasPrefetchedMore ? contents.slice(0, maxObjects) : contents;
+
+    for (const item of contentsToProcess) {
+      if (result.processed >= maxObjects) {
+        break;
+      }
+
+      const sourceKey = item?.Key;
+      if (!sourceKey) {
+        continue;
+      }
+
+      const relativePath = sourceKey.substring(normalizedSourcePrefix.length);
+      const targetKey = normalizedTargetPrefix + relativePath;
+
+      try {
+        result.lastProcessedKey = sourceKey;
+
+        if (skipExisting) {
+          const existingResponse = await this.s3Client.send(new ListObjectsV2Command({
+            Bucket: s3Config.bucket_name,
+            Prefix: targetKey,
+            MaxKeys: 1,
+          }));
+          const exactMatch = existingResponse?.Contents?.find((existing) => existing?.Key === targetKey);
+          if (exactMatch) {
+            if (resumeMode) {
+              result.deduped++;
+            } else {
+              result.skipped++;
+            }
+            result.processed++;
+            result.lastCompletedKey = sourceKey;
+            result.nextStartAfter = sourceKey;
+            continue;
+          }
+        }
+
+        await this.s3Client.send(new CopyObjectCommand({
+          Bucket: s3Config.bucket_name,
+          CopySource: encodeURIComponent(`${s3Config.bucket_name}/${sourceKey}`),
+          Key: targetKey,
+        }));
+        result.success++;
+        result.processed++;
+        result.lastCompletedKey = sourceKey;
+        result.nextStartAfter = sourceKey;
+      } catch (error) {
+        if (isWorkerInvocationLimitError(error)) {
+          const errorSummary = summarizeErrorCause(error);
+          result.hasMore = true;
+          result.done = false;
+          result.status = "running";
+          result.invocationLimitReached = true;
+          result.errorCause = errorSummary.cause;
+          result.lastError = errorSummary;
+          result.nextStartAfter = result.lastCompletedKey || startAfter || null;
+          console.warn(
+            `[S3BatchOps] copyDirectoryChunk invocation limit source=${sourcePath} target=${targetPath} ` +
+              `currentKey=${sourceKey} lastCompletedKey=${result.lastCompletedKey || "null"} cause=${errorSummary.cause}`
+          );
+          break;
+        }
+
+        result.failed++;
+        result.processed++;
+        result.lastCompletedKey = sourceKey;
+        result.nextStartAfter = sourceKey;
+        const errorSummary = summarizeErrorCause(error);
+        result.lastError = errorSummary;
+        if (result.failedItems.length < 20) {
+          result.failedItems.push({
+            source: sourceKey,
+            target: targetKey,
+            error: errorSummary.message || "复制失败",
+            cause: errorSummary.cause,
+          });
+        }
+      }
+    }
+
+    result.hasMore = !!result.hasMore || hasPrefetchedMore || !!response?.IsTruncated;
+    result.done = !result.hasMore;
+    result.status = result.done ? (result.failed > 0 ? (result.success > 0 || result.skipped > 0 || result.deduped > 0 ? "partial" : "failed") : "success") : "running";
+
+    console.log(
+      `[S3BatchOps] copyDirectoryChunk done source=${sourcePath} target=${targetPath} ` +
+        `status=${result.status} success=${result.success} skipped=${result.skipped} deduped=${result.deduped} failed=${result.failed} ` +
+        `processed=${result.processed} hasMore=${result.hasMore} nextStartAfter=${result.nextStartAfter || "null"} ` +
+        `lastCompletedKey=${result.lastCompletedKey || "null"} invocationLimitReached=${result.invocationLimitReached === true} ` +
+        `errorCause=${result.errorCause || "null"}`
+    );
+
+    return result;
+  }
+
+  /**
+   * 统计 S3 目录对象数量的一个可续跑块。
+   * 仅分页列出对象并累计数量，用于复制前得到真实总数。
+   */
+  async countDirectoryChunk(subPath, ctx = {}) {
+    const fsPath = ctx?.path || ctx?.sourcePath;
+    const requestedMaxPages = normalizePositiveInteger(ctx?.maxPages, 5);
+    const maxPages = Math.min(Math.max(requestedMaxPages, 1), 20);
+    const continuationToken = typeof ctx?.continuationToken === "string" && ctx.continuationToken ? ctx.continuationToken : undefined;
+
+    if (typeof fsPath !== "string") {
+      throw new ValidationError("S3 countDirectoryChunk 需要 ctx.path 或 ctx.sourcePath（FS 视图路径）");
+    }
+    if (!isDirectoryPath(fsPath)) {
+      throw new ValidationError("countDirectoryChunk 仅支持目录路径");
+    }
+
+    const s3Config = this.config;
+    const prefix = applyS3RootPrefix(s3Config, normalizeS3SubPath(subPath, true));
+    const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+    const result = {
+      done: false,
+      count: 0,
+      pages: 0,
+      nextContinuationToken: continuationToken || null,
+      invocationLimitReached: false,
+      errorCause: null,
+      lastError: null,
+    };
+
+    console.log(
+      `[S3BatchOps] countDirectoryChunk start path=${fsPath} maxPages=${maxPages} ` +
+        `continuationToken=${continuationToken ? "present" : "null"}`
+    );
+
+    try {
+      let token = continuationToken;
+      for (let page = 0; page < maxPages; page += 1) {
+        const response = await this.s3Client.send(new ListObjectsV2Command({
+          Bucket: s3Config.bucket_name,
+          Prefix: normalizedPrefix,
+          MaxKeys: 1000,
+          ...(token ? { ContinuationToken: token } : {}),
+        }));
+
+        const contents = Array.isArray(response?.Contents) ? response.Contents : [];
+        result.count += contents.length;
+        result.pages += 1;
+        token = response?.NextContinuationToken || undefined;
+        result.nextContinuationToken = token || null;
+
+        if (!token) {
+          result.done = true;
+          break;
+        }
+      }
+
+      if (!result.done && result.nextContinuationToken) {
+        result.done = false;
+      }
+
+      console.log(
+        `[S3BatchOps] countDirectoryChunk done path=${fsPath} count=${result.count} pages=${result.pages} ` +
+          `done=${result.done} hasToken=${!!result.nextContinuationToken}`
+      );
+
+      return result;
+    } catch (error) {
+      if (isWorkerInvocationLimitError(error)) {
+        const errorSummary = summarizeErrorCause(error);
+        result.invocationLimitReached = true;
+        result.errorCause = errorSummary.cause;
+        result.lastError = errorSummary;
+        result.done = false;
+        console.warn(
+          `[S3BatchOps] countDirectoryChunk invocation limit path=${fsPath} ` +
+            `count=${result.count} pages=${result.pages} cause=${errorSummary.cause}`
+        );
+        return result;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 删除 S3 目录的一个可续跑块。
+   * 使用 StartAfter 保存最后完成删除的 key，避免一页中途停止后重复整页。
+   */
+  async deleteDirectoryChunk(subPath, ctx = {}) {
+    const fsPath = ctx?.path || ctx?.fsPath;
+    const requestedMaxObjects = normalizePositiveInteger(ctx?.maxObjects, DEFAULT_DIRECTORY_DELETE_CHUNK_OBJECTS);
+    const maxObjects = Math.min(requestedMaxObjects, MAX_DIRECTORY_DELETE_CHUNK_OBJECTS);
+    const startAfter = typeof ctx?.startAfter === "string" && ctx.startAfter ? ctx.startAfter : null;
+
+    if (typeof fsPath !== "string") {
+      throw new ValidationError("S3 deleteDirectoryChunk 需要 ctx.path（FS 视图路径）");
+    }
+    if (!isDirectoryPath(fsPath)) {
+      throw new ValidationError("deleteDirectoryChunk 仅支持目录路径");
+    }
+
+    const s3Config = this.config;
+    const prefix = applyS3RootPrefix(s3Config, normalizeS3SubPath(subPath, true));
+    const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+
+    console.log(
+      `[S3BatchOps] deleteDirectoryChunk start path=${fsPath} maxObjects=${maxObjects} ` +
+        `startAfter=${startAfter || "null"}`
+    );
+
+    if (!startAfter) {
+      const sourceExists = await checkDirectoryExists(this.s3Client, s3Config.bucket_name, normalizedPrefix);
+      if (!sourceExists) {
+        return {
+          done: true,
+          status: "skipped",
+          skippedRoot: true,
+          success: 0,
+          skipped: 1,
+          failed: 0,
+          processed: 0,
+          message: "目录不存在，已跳过删除",
+        };
+      }
+    }
+
+    const result = {
+      done: false,
+      status: "running",
+      success: 0,
+      skipped: 0,
+      failed: 0,
+      processed: 0,
+      failedItems: [],
+      nextStartAfter: startAfter,
+      lastProcessedKey: startAfter,
+      lastCompletedKey: startAfter,
+      invocationLimitReached: false,
+      errorCause: null,
+      lastError: null,
+      hasMore: false,
+    };
+
+    let response;
+    try {
+      const listMaxKeys = Math.min(1000, Math.max(maxObjects + 1, 1));
+      response = await this.s3Client.send(new ListObjectsV2Command({
+        Bucket: s3Config.bucket_name,
+        Prefix: normalizedPrefix,
+        MaxKeys: listMaxKeys,
+        ...(startAfter ? { StartAfter: startAfter } : {}),
+      }));
+    } catch (error) {
+      if (isWorkerInvocationLimitError(error)) {
+        const errorSummary = summarizeErrorCause(error);
+        result.hasMore = true;
+        result.invocationLimitReached = true;
+        result.errorCause = errorSummary.cause;
+        result.lastError = errorSummary;
+        console.warn(
+          `[S3BatchOps] deleteDirectoryChunk list invocation limit path=${fsPath} ` +
+            `lastCompletedKey=${result.lastCompletedKey || "null"} cause=${errorSummary.cause}`
+        );
+        return result;
+      }
+      throw error;
+    }
+
+    const contents = Array.isArray(response?.Contents) ? response.Contents : [];
+    const hasPrefetchedMore = contents.length > maxObjects;
+    const contentsToProcess = hasPrefetchedMore ? contents.slice(0, maxObjects) : contents;
+    const objects = contentsToProcess
+      .map((item) => item?.Key)
+      .filter(Boolean)
+      .map((Key) => ({ Key }));
+
+    if (objects.length > 0) {
+      try {
+        const deleteResponse = await this.s3Client.send(new DeleteObjectsCommand({
+          Bucket: s3Config.bucket_name,
+          Delete: {
+            Objects: objects,
+            Quiet: false,
+          },
+        }));
+        const errors = Array.isArray(deleteResponse?.Errors) ? deleteResponse.Errors : [];
+        const failedKeys = new Set(errors.map((item) => item?.Key).filter(Boolean));
+
+        for (const object of objects) {
+          const key = object.Key;
+          result.lastProcessedKey = key;
+          result.processed++;
+
+          if (failedKeys.has(key)) {
+            result.failed++;
+            const errorItem = errors.find((item) => item?.Key === key);
+            if (result.failedItems.length < 20) {
+              result.failedItems.push({
+                key,
+                path: fsPath,
+                error: errorItem?.Message || errorItem?.Code || "删除失败",
+              });
+            }
+          } else {
+            result.success++;
+          }
+
+          result.lastCompletedKey = key;
+          result.nextStartAfter = key;
+        }
+      } catch (error) {
+        if (isWorkerInvocationLimitError(error)) {
+          const errorSummary = summarizeErrorCause(error);
+          result.hasMore = true;
+          result.invocationLimitReached = true;
+          result.errorCause = errorSummary.cause;
+          result.lastError = errorSummary;
+          result.nextStartAfter = result.lastCompletedKey || startAfter || null;
+          console.warn(
+            `[S3BatchOps] deleteDirectoryChunk invocation limit path=${fsPath} ` +
+              `lastCompletedKey=${result.lastCompletedKey || "null"} cause=${errorSummary.cause}`
+          );
+          return result;
+        }
+        throw error;
+      }
+    }
+
+    result.hasMore = !!result.hasMore || hasPrefetchedMore || !!response?.IsTruncated;
+    result.done = !result.hasMore;
+    result.status = result.done ? (result.failed > 0 ? (result.success > 0 || result.skipped > 0 ? "partial" : "failed") : "success") : "running";
+
+    console.log(
+      `[S3BatchOps] deleteDirectoryChunk done path=${fsPath} status=${result.status} ` +
+        `success=${result.success} skipped=${result.skipped} failed=${result.failed} processed=${result.processed} ` +
+        `hasMore=${result.hasMore} nextStartAfter=${result.nextStartAfter || "null"} ` +
+        `invocationLimitReached=${result.invocationLimitReached === true} errorCause=${result.errorCause || "null"}`
+    );
+
+    return result;
+  }
 }

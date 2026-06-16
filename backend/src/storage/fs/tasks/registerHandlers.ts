@@ -1,5 +1,7 @@
 import { taskRegistry } from './TaskRegistry.js';
 import { CopyTaskHandler } from './handlers/CopyTaskHandler.js';
+import { DeleteTaskHandler } from './handlers/DeleteTaskHandler.js';
+import { MoveTaskHandler } from './handlers/MoveTaskHandler.js';
 import { FsIndexRebuildTaskHandler } from './handlers/FsIndexRebuildTaskHandler.js';
 import { FsIndexApplyDirtyTaskHandler } from './handlers/FsIndexApplyDirtyTaskHandler.js';
 
@@ -28,6 +30,10 @@ export function registerTaskHandlers(): void {
 
   // 注册复制任务处理器
   taskRegistry.register(new CopyTaskHandler());
+
+  // 注册文件系统批量操作任务处理器
+  taskRegistry.register(new DeleteTaskHandler());
+  taskRegistry.register(new MoveTaskHandler());
 
   // 注册 FS 索引重建任务处理器
   taskRegistry.register(new FsIndexRebuildTaskHandler());

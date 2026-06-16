@@ -115,6 +115,7 @@ export const api = {
     updateFile: fsService.updateFile,
     // 复制相关
     batchCopyItems: fsService.batchCopyItems,
+    batchMoveItems: fsService.batchMoveItems,
 
     // 索引管理
     fsIndex: fsIndexService,
@@ -154,6 +155,7 @@ export const api = {
       updateFile: fsService.updateFile,
       // 复制相关
       batchCopyItems: fsService.batchCopyItems,
+      batchMoveItems: fsService.batchMoveItems,
       // 分享相关
       createShareFromFileSystem: fsService.createShareFromFileSystem,
     },

@@ -4,7 +4,7 @@
  */
 
 import { NotFoundError } from "../../../../http/errors.js";
-import { S3Client, ListObjectsV2Command, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { checkDirectoryExists, updateParentDirectoriesModifiedTime } from "../utils/S3DirectoryUtils.js";
 import { applyS3RootPrefix, isMountRootPath, normalizeS3SubPath } from "../utils/S3PathUtils.js";
 import { handleFsError } from "../../../fs/utils/ErrorHandler.js";
@@ -473,10 +473,48 @@ export class S3DirectoryOperations {
    * @param {string} bucketName - 存储桶名称
    * @param {string} prefix - 目录前缀
    * @param {string} storageConfigId - 存储配置ID
-   * @returns {Promise<void>}
+   * @returns {Promise<{success:number,failed:number,failedItems:Array<{key:string,error:string}>}>}
    */
   async deleteDirectoryRecursive(s3Client, bucketName, prefix, storageConfigId) {
     let continuationToken = undefined;
+    const result = {
+      success: 0,
+      failed: 0,
+      failedItems: [],
+      verificationDeleted: 0,
+    };
+
+    const deleteObjects = async (objects, phase = "main") => {
+      if (!Array.isArray(objects) || objects.length === 0) {
+        return;
+      }
+
+      const deleteCommand = new DeleteObjectsCommand({
+        Bucket: bucketName,
+        Delete: {
+          Objects: objects,
+          Quiet: false,
+        },
+      });
+      const deleteResponse = await s3Client.send(deleteCommand);
+      const errors = Array.isArray(deleteResponse?.Errors) ? deleteResponse.Errors : [];
+      const failedKeys = new Set(errors.map((item) => item?.Key).filter(Boolean));
+      const successCount = objects.length - failedKeys.size;
+
+      result.success += successCount;
+      result.failed += failedKeys.size;
+      if (phase === "verification") {
+        result.verificationDeleted += successCount;
+      }
+
+      for (const item of errors) {
+        if (result.failedItems.length >= 20) break;
+        result.failedItems.push({
+          key: item?.Key || "",
+          error: item?.Message || item?.Code || "删除失败",
+        });
+      }
+    };
 
     try {
       do {
@@ -491,27 +529,43 @@ export class S3DirectoryOperations {
         const response = await s3Client.send(listCommand);
 
         if (response.Contents && response.Contents.length > 0) {
-          // 批量删除对象
-          const deletePromises = response.Contents.map(async (item) => {
-            const deleteParams = {
-              Bucket: bucketName,
-              Key: item.Key,
-            };
+          const objects = response.Contents
+            .map((item) => item?.Key)
+            .filter(Boolean)
+            .map((Key) => ({ Key }));
 
-            const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
-            const deleteCommand = new DeleteObjectCommand(deleteParams);
-            await s3Client.send(deleteCommand);
-
-            // 文件删除完成，无需数据库操作
-          });
-
-          await Promise.all(deletePromises);
+          await deleteObjects(objects);
         }
 
         continuationToken = response.NextContinuationToken;
       } while (continuationToken);
 
-      console.log(`成功删除目录: ${prefix}`);
+      // 最小兜底：边分页边删除可能改变对象集合。主循环结束后再扫一轮 prefix，
+      // 如果发现残留对象，再做一次删除 pass，降低分页变化或并发写入造成的残留概率。
+      let verificationToken = undefined;
+      do {
+        const verifyCommand = new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: prefix,
+          MaxKeys: 1000,
+          ContinuationToken: verificationToken,
+        });
+        const verifyResponse = await s3Client.send(verifyCommand);
+        const objects = (verifyResponse.Contents || [])
+          .map((item) => item?.Key)
+          .filter(Boolean)
+          .map((Key) => ({ Key }));
+
+        await deleteObjects(objects, "verification");
+        verificationToken = verifyResponse.NextContinuationToken;
+      } while (verificationToken);
+
+      if (result.failed > 0) {
+        console.warn(`目录删除部分失败: ${prefix}, 成功=${result.success}, 失败=${result.failed}`);
+      } else {
+        console.log(`成功删除目录: ${prefix}, 删除对象=${result.success}`);
+      }
+      return result;
     } catch (error) {
       console.error(`删除目录失败: ${error.message}`);
       throw error;

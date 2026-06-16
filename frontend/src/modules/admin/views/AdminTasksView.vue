@@ -733,6 +733,8 @@ const formatTaskType = (type) => {
   if (!type) return t('admin.tasks.taskType.unknown')
   const typeMap = {
     copy: t('admin.tasks.taskType.copy'),
+    delete: t('admin.tasks.taskType.delete'),
+    move: t('admin.tasks.taskType.move'),
     fs_index_rebuild: t('admin.tasks.taskType.fs_index_rebuild'),
     fs_index_apply_dirty: t('admin.tasks.taskType.fs_index_apply_dirty')
   }
@@ -754,6 +756,8 @@ const formatDateTime = (dateStr) => {
 const getTaskIcon = (type) => {
   if (!type) return SyncIcon
   if (type.includes('copy')) return CopyIcon
+  if (type.includes('delete')) return TrashIcon
+  if (type.includes('move')) return SyncIcon
   if (type.includes('index')) return DatabaseIcon
   return SyncIcon
 }
@@ -762,6 +766,8 @@ const getTaskColorClass = (type) => {
   const baseClass = 'p-2 rounded-lg mt-0.5 border'
   if (!type) return `${baseClass} text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 border-gray-200 dark:border-gray-600`
   if (type.includes('copy')) return `${baseClass} text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800`
+  if (type.includes('delete')) return `${baseClass} text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800`
+  if (type.includes('move')) return `${baseClass} text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 border-cyan-100 dark:border-cyan-800`
   if (type.includes('index')) return `${baseClass} text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-100 dark:border-purple-800`
   return `${baseClass} text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 border-gray-200 dark:border-gray-600`
 }

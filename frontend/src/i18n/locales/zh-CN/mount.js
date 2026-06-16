@@ -135,6 +135,7 @@ export default {
       batchDeleteFailed: "批量删除失败: {message}",
       previewError: "文件预览加载失败",
       batchDeleteSuccess: "成功删除了 {count} 个项目",
+      batchDeletePartial: "批量删除部分成功：成功 {success} 个，失败 {failed} 个",
       copySuccess: "{message}",
       copyFailed: "复制失败: {message}",
       getFileLinkFailed: "获取文件直链失败: {message}",

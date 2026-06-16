@@ -73,6 +73,9 @@ export async function renameItem(fs, oldPath, newPath, userIdOrInfo, userType) {
 export async function copyItem(fs, sourcePath, targetPath, userIdOrInfo, userType, options = {}) {
   // 目标是目录且源为文件时，自动拼接源文件名
   targetPath = resolveCopyTargetPath(sourcePath, targetPath);
+  if (isDirectoryPath(sourcePath) && !isDirectoryPath(targetPath)) {
+    targetPath = normalizePath(targetPath, true);
+  }
 
   // 先解析源与目标挂载与驱动，在 FS 层统一做跨存储决策
   const sourceCtx = await fs.mountManager.getDriverByPath(sourcePath, userIdOrInfo, userType);

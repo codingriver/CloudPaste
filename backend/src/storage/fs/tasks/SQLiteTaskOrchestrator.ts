@@ -415,6 +415,13 @@ export class SQLiteTaskOrchestrator implements TaskOrchestratorAdapter {
           );
         },
 
+        getStats: async (jobId: string) => {
+          const row = this.db.prepare(`
+            SELECT stats FROM ${DbTables.TASKS} WHERE task_id = ?
+          `).get(jobId) as any;
+          return JSON.parse(row?.stats || '{}') as TaskStats;
+        },
+
         getFileSystem: () => this.fileSystem,
         getEnv: () => ({ db: this.db }),
       };
@@ -443,10 +450,11 @@ export class SQLiteTaskOrchestrator implements TaskOrchestratorAdapter {
 
     // 根据统计结果确定最终状态
     const finalStats = JSON.parse(finalRow.stats) as TaskStats;
+    const hasCompletedWork = (finalStats.successCount || 0) > 0 || (finalStats.skippedCount || 0) > 0;
     const finalStatus: TaskStatus =
       errorMessage ? TaskStatus.FAILED :
       finalStats.failedCount === 0 ? TaskStatus.COMPLETED :
-      finalStats.successCount === 0 ? TaskStatus.FAILED :
+      !hasCompletedWork ? TaskStatus.FAILED :
       TaskStatus.PARTIAL;
 
     // 更新最终状态

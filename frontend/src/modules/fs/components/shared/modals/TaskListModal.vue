@@ -161,6 +161,14 @@
                 :style="{ width: task.progress + '%' }"
               ></div>
             </div>
+            <div
+              v-if="task.progressText"
+              class="mt-1 flex items-center justify-between gap-2 pl-6 text-[11px]"
+              :class="darkMode ? 'text-gray-400' : 'text-gray-500'"
+            >
+              <span class="truncate">{{ task.progressText }}</span>
+              <span v-if="task.batchText" class="flex-shrink-0 tabular-nums">{{ task.batchText }}</span>
+            </div>
 
             <!-- 展开详情：文件列表 -->
             <transition
@@ -276,6 +284,12 @@ const extractNameFromPath = (path) => {
  * 生成任务名称
  */
 const generateTaskName = (jobData) => {
+  const deletePaths = jobData.payload?.paths;
+  if (Array.isArray(deletePaths) && deletePaths.length > 0) {
+    const firstName = extractNameFromPath(deletePaths[0]) || t('mount.taskList.unknownFile');
+    return deletePaths.length === 1 ? firstName : `${firstName} (+${deletePaths.length - 1})`;
+  }
+
   const items = jobData.payload?.items;
   if (!items || items.length === 0) {
     return `#${jobData.jobId?.substring(0, 6) || '???'}`;
@@ -292,10 +306,48 @@ const generateTaskName = (jobData) => {
   }
 };
 
+const getDirectoryProgress = (stats) => {
+  const operation = stats?.operationProgress;
+  if (operation?.mode === 'directory_copy' || operation?.mode === 'directory_delete' || operation?.mode === 'directory_move') {
+    return operation;
+  }
+
+  const direct = stats?.directoryProgress;
+  if (direct?.mode === 'directory_copy') return direct;
+
+  const firstItemWithDetails = stats?.itemResults?.find((item) => (
+    item?.meta?.copyDetails || item?.meta?.deleteDetails || item?.meta?.moveDetails || item?.meta?.moveDeleteDetails
+  ));
+  const firstDetails =
+    firstItemWithDetails?.meta?.copyDetails ||
+    firstItemWithDetails?.meta?.deleteDetails ||
+    firstItemWithDetails?.meta?.moveDetails ||
+    firstItemWithDetails?.meta?.moveDeleteDetails;
+  if (!firstDetails) return null;
+
+  const processedObjects = Number(firstDetails.processed || 0);
+  const totalObjects = Number(firstDetails.totalObjects || processedObjects || 0);
+  if (processedObjects <= 0 && totalObjects <= 0) return null;
+
+  return {
+    mode: firstDetails.phase ? 'directory_move' : (firstItemWithDetails?.meta?.deleteDetails ? 'directory_delete' : 'directory_copy'),
+    phase: firstDetails.phase,
+    processedObjects,
+    totalObjects,
+    successObjects: Number(firstDetails.success || 0),
+    failedObjects: Number(firstDetails.failed || 0),
+    skippedObjects: Number(firstDetails.skipped || 0),
+    dedupedObjects: Number(firstDetails.deduped || 0),
+    batchSize: Number(firstDetails.batchSize || 0),
+    currentBatch: Number(firstDetails.currentBatch || 0),
+  };
+};
+
 /**
  * 转换后端数据为前端格式
  */
 const transformTaskData = (jobData) => {
+  const directoryProgress = getDirectoryProgress(jobData.stats);
   const total = jobData.stats?.totalItems || 0;
   const success = jobData.stats?.successCount || 0;
   const failed = jobData.stats?.failedCount || 0;
@@ -307,6 +359,8 @@ const transformTaskData = (jobData) => {
   let progress = 0;
   if (totalBytes > 0 && bytesTransferred > 0) {
     progress = Math.round((bytesTransferred / totalBytes) * 100);
+  } else if (directoryProgress?.totalObjects > 0) {
+    progress = Math.round((directoryProgress.processedObjects / directoryProgress.totalObjects) * 100);
   } else if (total > 0) {
     progress = Math.round((processed / total) * 100);
   }
@@ -322,11 +376,18 @@ const transformTaskData = (jobData) => {
     type: jobData.taskType,
     status: jobData.status,
     progress,
+    progressText: directoryProgress
+      ? `处理对象 ${directoryProgress.processedObjects}/${directoryProgress.totalObjects}`
+      : (total > 0 ? `处理项目 ${processed}/${total}` : ''),
+    batchText: directoryProgress?.currentBatch
+      ? `第 ${directoryProgress.currentBatch} 批`
+      : '',
     stats: {
       total,
       success,
       failed,
       skipped: jobData.stats?.skippedCount || 0,
+      directoryProgress,
     },
     itemResults,
     relativeTime: formatRelativeTime(jobData.createdAt),
@@ -340,7 +401,7 @@ const transformTaskData = (jobData) => {
 const loadTasks = async () => {
   isLoading.value = true;
   try {
-    const response = await listJobs({ taskType: 'copy' });
+    const response = await listJobs({});
     const jobsList = response?.data?.jobs || response?.jobs || [];
     tasks.value = jobsList.map(transformTaskData);
   } catch (error) {

@@ -27,6 +27,20 @@ export default {
       expiresHint: "Set proxy signature expiration time, 0 means never expires",
       expiresUnit: "seconds",
     },
+    copySettings: {
+      title: "Batch Copy Settings",
+      description: "Configure directory copy chunk size for the Worker runtime",
+      directoryChunkSizeLabel: "Directory copy objects per chunk",
+      directoryChunkSizeHint: "Default is 10, allowed range 1-100. This is a target value; the Worker runtime will automatically reduce it and continue if subrequest limits are hit.",
+      itemsUnit: "items",
+    },
+    deleteSettings: {
+      title: "Batch Delete Settings",
+      description: "Configure directory delete objects per batch for the Worker runtime",
+      directoryChunkSizeLabel: "Directory delete objects per batch",
+      directoryChunkSizeHint: "Default is 1000. The S3/R2 bulk delete API supports up to 1000 objects per request; lower it if Worker limits still occur.",
+      itemsUnit: "items",
+    },
     buttons: {
       updateSettings: "Update Settings",
       updating: "Updating...",

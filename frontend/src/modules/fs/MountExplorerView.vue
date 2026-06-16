@@ -1114,12 +1114,26 @@ const confirmDelete = async () => {
     const result = await fileOperations.batchDeleteItems(itemsToDelete.value);
 
     if (result.success) {
-      showMessage("success", result.message);
+      if (result.jobId) {
+        showMessage("success", result.message || "删除作业已创建");
+        if (itemsToDelete.value.length > 1) {
+          clearSelection();
+        }
+        showDeleteDialog.value = false;
+        itemsToDelete.value = [];
+        openTasksModal();
+        return;
+      }
+
+      showMessage(result.status === "partial" ? "warning" : "success", result.message);
 
       // 删除属于写操作：清空前端缓存（秒开快照 + 可验证缓存），强制下一次导航以服务端为准
       invalidateCaches();
       // 立即从当前目录移除（减少等待与闪烁）
-      removeItemsFromCurrentDirectory(itemsToDelete.value.map((item) => item?.path).filter(Boolean));
+      const deletedPaths = Array.isArray(result.deletedPaths)
+        ? result.deletedPaths
+        : itemsToDelete.value.map((item) => item?.path).filter(Boolean);
+      removeItemsFromCurrentDirectory(deletedPaths);
 
       // 如果是批量删除，清空选择状态
       if (itemsToDelete.value.length > 1) {

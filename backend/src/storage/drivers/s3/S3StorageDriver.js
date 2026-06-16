@@ -404,6 +404,42 @@ export class S3StorageDriver extends BaseDriver {
   }
 
   /**
+   * 复制目录的一个可续跑块（Workflow 分步任务使用）
+   */
+  async copyDirectoryChunk(sourceSubPath, targetSubPath, ctx = {}) {
+    this._ensureInitialized();
+    try {
+      return await this.batchOps.copyDirectoryChunk(sourceSubPath, targetSubPath, ctx);
+    } catch (error) {
+      throw this._rethrow(error, "复制目录分块失败");
+    }
+  }
+
+  /**
+   * 统计目录对象数量的一个可续跑块（Workflow 分步任务使用）
+   */
+  async countDirectoryChunk(subPath, ctx = {}) {
+    this._ensureInitialized();
+    try {
+      return await this.batchOps.countDirectoryChunk(subPath, ctx);
+    } catch (error) {
+      throw this._rethrow(error, "统计目录对象数量失败");
+    }
+  }
+
+  /**
+   * 删除目录的一个可续跑块（Workflow 分步任务使用）
+   */
+  async deleteDirectoryChunk(subPath, ctx = {}) {
+    this._ensureInitialized();
+    try {
+      return await this.batchOps.deleteDirectoryChunk(subPath, ctx);
+    } catch (error) {
+      throw this._rethrow(error, "删除目录分块失败");
+    }
+  }
+
+  /**
    * 生成预签名下载URL
    * @param {string} subPath - 子路径（subPath-only）
    * @param {Object} ctx - 上下文（mount/path/subPath/request/...）

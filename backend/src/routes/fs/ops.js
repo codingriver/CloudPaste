@@ -44,6 +44,33 @@ const copyItemsResolver = (c) => {
   return targets;
 };
 
+const deleteJobPathsResolver = (c) => {
+  const body = c.get("jsonBody");
+  const paths = body?.payload?.paths ?? body?.paths ?? null;
+  if (!paths) {
+    return [];
+  }
+  return Array.isArray(paths) ? paths : [paths];
+};
+
+const moveItemsResolver = (c) => {
+  const body = c.get("jsonBody");
+  const items = body?.payload?.items ?? body?.items ?? null;
+  if (!items) {
+    return [];
+  }
+  const targets = [];
+  for (const item of items) {
+    if (item?.sourcePath) {
+      targets.push(item.sourcePath);
+    }
+    if (item?.targetPath) {
+      targets.push(item.targetPath);
+    }
+  }
+  return targets;
+};
+
 const dynamicJobPolicy = async (c, next) => {
   const body = c.get("jsonBody") || {};
   const taskTypeRaw = body.taskType ?? body.task_type ?? "copy";
@@ -60,9 +87,16 @@ const dynamicJobPolicy = async (c, next) => {
     throw new ValidationError(`任务类型未配置 createPolicy: ${taskType}`);
   }
 
-  // 目前只有 copy 需要路径鉴权
   if (policy === "fs.copy") {
     return usePolicy("fs.copy", { pathResolver: copyItemsResolver })(c, next);
+  }
+
+  if (policy === "fs.delete") {
+    return usePolicy("fs.delete", { pathResolver: deleteJobPathsResolver })(c, next);
+  }
+
+  if (policy === "fs.rename") {
+    return usePolicy("fs.rename", { pathResolver: moveItemsResolver })(c, next);
   }
 
   if (pathCheck) {
@@ -132,10 +166,41 @@ export const registerOpsRoutes = (router, helpers) => {
     }
 
     const mountManager = new MountManager(db, encryptionSecret, repositoryFactory, { env: c.env });
-    const fileSystem = new FileSystem(mountManager);
-    const result = await fileSystem.batchRemoveItems(paths, userIdOrInfo, userType);
+    const fileSystem = new FileSystem(mountManager, c.env);
+    const jobDescriptor = await fileSystem.createJob(
+      "delete",
+      { paths, options: body.options || {} },
+      userIdOrInfo,
+      userType,
+    );
 
-    return jsonOk(c, result, "批量删除成功");
+    return jsonOk(c, jobDescriptor, "删除作业已创建");
+  });
+
+  router.post("/api/fs/batch-move", parseJsonBody, usePolicy("fs.rename", { pathResolver: moveItemsResolver }), async (c) => {
+    const db = c.env.DB;
+    const userInfo = c.get("userInfo");
+    const { userIdOrInfo, userType } = getServiceParams(userInfo);
+    const { getEncryptionSecret } = await import("../../utils/environmentUtils.js");
+    const encryptionSecret = getEncryptionSecret(c);
+    const repositoryFactory = c.get("repos");
+    const body = c.get("jsonBody");
+    const items = body.items;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new ValidationError("请提供有效的移动项数组");
+    }
+
+    const mountManager = new MountManager(db, encryptionSecret, repositoryFactory, { env: c.env });
+    const fileSystem = new FileSystem(mountManager, c.env);
+    const jobDescriptor = await fileSystem.createJob(
+      "move",
+      { items, options: body.options || {} },
+      userIdOrInfo,
+      userType,
+    );
+
+    return jsonOk(c, jobDescriptor, "移动作业已创建");
   });
 
   router.post("/api/fs/batch-copy", parseJsonBody, usePolicy("fs.copy", { pathResolver: copyItemsResolver }), async (c) => {
@@ -205,6 +270,20 @@ export const registerOpsRoutes = (router, helpers) => {
         retryPolicy: body?.retryPolicy,
       };
       payload = { items, options };
+    }
+
+    if (taskType === "delete" && !payload) {
+      payload = {
+        paths: body?.paths,
+        options: body?.options || {},
+      };
+    }
+
+    if (taskType === "move" && !payload) {
+      payload = {
+        items: body?.items,
+        options: body?.options || {},
+      };
     }
 
     // 支持 fs_index_rebuild：允许将 mountIds/options 平铺在 body 上

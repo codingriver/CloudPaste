@@ -191,6 +191,8 @@ export default {
 
     taskType: {
       copy: '复制',
+      delete: '删除',
+      move: '移动',
       fs_index_rebuild: '索引重建',
       fs_index_apply_dirty: '索引增量应用',
       unknown: '未知任务',

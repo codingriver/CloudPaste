@@ -167,6 +167,22 @@ export function buildBuiltinJobTypeDefinitions(): JobTypeDefinition[] {
       capabilities: { retry: "copy-retry" },
     },
     {
+      taskType: "delete",
+      i18nKey: "admin.tasks.taskType.delete",
+      category: "fs",
+      visibility: { mode: "owner-only", permission: Permission.MOUNT_DELETE },
+      createPolicy: { policy: "fs.delete", pathCheck: true },
+      capabilities: { retry: "none" },
+    },
+    {
+      taskType: "move",
+      i18nKey: "admin.tasks.taskType.move",
+      category: "fs",
+      visibility: { mode: "owner-only", permission: Permission.MOUNT_RENAME },
+      createPolicy: { policy: "fs.rename", pathCheck: true },
+      capabilities: { retry: "none" },
+    },
+    {
       taskType: "fs_index_rebuild",
       i18nKey: "admin.tasks.taskType.fs_index_rebuild",
       category: "index",

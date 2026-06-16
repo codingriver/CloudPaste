@@ -368,18 +368,34 @@ export function useFsService() {
   /**
    * 批量删除
    * @param {string[]} paths
-   * @returns {Promise<{ success: true; raw: any }>}
+   * @returns {Promise<{ success: boolean; message: string; status: string; raw: any }>}
    */
   const batchDeleteItems = async (paths) => {
     const response = await api.fs.batchDeleteItems(paths);
     const payload = response && typeof response === "object" && "data" in response ? response.data : response;
+    if (payload?.jobId) {
+      return {
+        success: true,
+        message: response?.message || "删除作业已创建",
+        status: payload.status || "pending",
+        jobId: payload.jobId,
+        taskType: payload.taskType || "delete",
+        raw: payload,
+      };
+    }
 
-    if (payload && Array.isArray(payload.failed) && payload.failed.length > 0) {
-      throw new Error(payload.failed[0].error || "批量删除失败");
+    const failedCount = Array.isArray(payload?.failed) ? payload.failed.length : 0;
+    const successCount = Number(payload?.success || 0);
+    const status = payload?.status || (failedCount === 0 ? "success" : successCount > 0 ? "partial" : "failed");
+
+    if (!response?.success) {
+      throw new Error(response?.message || payload?.failed?.[0]?.error || "批量删除失败");
     }
 
     return {
-      success: true,
+      success: status !== "failed",
+      message: response?.message || payload?.message || (status === "success" ? "批量删除成功" : "批量删除失败"),
+      status,
       raw: payload,
     };
   };
@@ -393,6 +409,10 @@ export function useFsService() {
    */
   const batchCopyItems = async (items, options = {}) => {
     return api.fs.batchCopyItems(items, options);
+  };
+
+  const batchMoveItems = async (items, options = {}) => {
+    return api.fs.batchMoveItems(items, options);
   };
 
   /**
@@ -500,6 +520,7 @@ export function useFsService() {
     createDirectory,
     batchDeleteItems,
     batchCopyItems,
+    batchMoveItems,
     getFileLink,
     downloadFile,
     createJob,

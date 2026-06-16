@@ -20,6 +20,36 @@
       </button>
     </div>
 
+    <div
+      v-if="directoryProgress"
+      class="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border border-blue-100 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2 text-xs"
+    >
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">处理对象</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ directoryProgress.processedObjects }}/{{ directoryProgress.totalObjects }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">当前批次</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          第 {{ directoryProgress.currentBatch }} 批
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">每批数量</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ directoryProgress.batchSize || '--' }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">已存在</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ directoryProgress.dedupedObjects || 0 }}
+        </div>
+      </div>
+    </div>
+
     <!-- 文件列表容器 -->
     <div v-if="itemResults.length > 0" class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
       <div
@@ -144,6 +174,26 @@
                 <span class="flex-shrink-0 text-gray-500 dark:text-gray-400">{{ t('admin.tasks.details.targetPath') }}:</span>
                 <span class="font-mono text-gray-700 dark:text-gray-300 break-all select-text">{{ item.targetPath }}</span>
               </div>
+              <div v-if="getCopyDetails(item)" class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                <div class="rounded bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <span class="text-gray-500 dark:text-gray-400">对象</span>
+                  <span class="ml-1 font-mono text-gray-800 dark:text-gray-100">
+                    {{ getCopyDetails(item).processed }}/{{ getCopyDetails(item).totalObjects || getCopyDetails(item).processed }}
+                  </span>
+                </div>
+                <div class="rounded bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <span class="text-gray-500 dark:text-gray-400">成功</span>
+                  <span class="ml-1 font-mono text-gray-800 dark:text-gray-100">{{ getCopyDetails(item).success || 0 }}</span>
+                </div>
+                <div class="rounded bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <span class="text-gray-500 dark:text-gray-400">失败</span>
+                  <span class="ml-1 font-mono text-gray-800 dark:text-gray-100">{{ getCopyDetails(item).failed || 0 }}</span>
+                </div>
+                <div class="rounded bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <span class="text-gray-500 dark:text-gray-400">已存在</span>
+                  <span class="ml-1 font-mono text-gray-800 dark:text-gray-100">{{ getCopyDetails(item).deduped || 0 }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </Transition>
@@ -224,6 +274,32 @@ const failedItems = computed(() => {
 })
 
 const failedCount = computed(() => failedItems.value.length)
+
+const getCopyDetails = (item) => item?.meta?.copyDetails || null
+
+const directoryProgress = computed(() => {
+  const direct = props.task.stats?.directoryProgress
+  if (direct?.mode === 'directory_copy') return direct
+
+  const details = itemResults.value.find((item) => item?.meta?.copyDetails)?.meta?.copyDetails
+  if (!details) return null
+
+  const processedObjects = Number(details.processed || 0)
+  const totalObjects = Number(details.totalObjects || processedObjects || 0)
+  if (processedObjects <= 0 && totalObjects <= 0) return null
+
+  const batchSize = Number(details.batchSize || props.task.payload?.options?.maxDirectoryCopyObjects || 0)
+  return {
+    processedObjects,
+    totalObjects,
+    successObjects: Number(details.success || 0),
+    failedObjects: Number(details.failed || 0),
+    skippedObjects: Number(details.skipped || 0),
+    dedupedObjects: Number(details.deduped || 0),
+    batchSize,
+    currentBatch: Number(details.currentBatch || (batchSize > 0 ? Math.ceil(processedObjects / batchSize) : 1)),
+  }
+})
 
 /**
  * 从路径中提取文件/文件夹名称

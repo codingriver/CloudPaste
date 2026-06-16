@@ -8,6 +8,8 @@ export interface ExecutionContext {
   isCancelled(jobId: string): Promise<boolean>;
   /** 更新作业进度统计 */
   updateProgress(jobId: string, stats: Partial<TaskStats>): Promise<void>;
+  /** 读取当前作业进度统计 */
+  getStats?(jobId: string): Promise<TaskStats>;
   /** 获取 FileSystem 实例 */
   getFileSystem(): any;
   /** 获取环境绑定 (DB/R2/etc.) */
@@ -27,6 +29,12 @@ export interface InternalJob {
   createdAt: Date;
 }
 
+export interface TaskChunkResult {
+  done: boolean;
+  message?: string;
+  invocationLimitReached?: boolean;
+}
+
 /**
  * 任务处理器接口 - 每个任务类型实现一个处理器
  */
@@ -39,6 +47,9 @@ export interface TaskHandler {
 
   /** 执行任务 - 遍历处理所有任务项，定期检查取消状态并更新进度 */
   execute(job: InternalJob, context: ExecutionContext): Promise<void>;
+
+  /** 可选：按 Workflow step 分块执行，避免单次 Worker invocation 做过多子请求 */
+  executeChunk?(job: InternalJob, context: ExecutionContext): Promise<TaskChunkResult>;
 
   /** 创建统计模板 - 根据载荷初始化统计对象 */
   createStatsTemplate(payload: any): TaskStats;

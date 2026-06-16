@@ -135,6 +135,7 @@ export default {
       batchDeleteFailed: "Batch delete failed: {message}",
       previewError: "File preview loading failed",
       batchDeleteSuccess: "Successfully deleted {count} items",
+      batchDeletePartial: "Batch delete partially completed: {success} succeeded, {failed} failed",
       copySuccess: "{message}",
       copyFailed: "Copy failed: {message}",
       getFileLinkFailed: "Failed to get file direct link: {message}",

@@ -152,12 +152,13 @@ export class WorkflowsTaskOrchestrator implements TaskOrchestratorAdapter {
     const payload = JSON.parse(taskRecord.payload as string);
     const dbStats = JSON.parse(taskRecord.stats as string) as TaskStats;
 
+    const workflowInstanceId = (taskRecord.workflow_instance_id as string | null) || jobId;
     let workflowStatus: WorkflowInstanceStatus | null = null;
     try {
-      const instance = await this.env.JOB_WORKFLOW.get(jobId);
+      const instance = await this.env.JOB_WORKFLOW.get(workflowInstanceId);
       workflowStatus = await instance.status();
     } catch (error) {
-      console.log(`Workflow ${jobId} 不可用，使用数据库状态:`, error);
+      console.log(`Workflow ${workflowInstanceId} 不可用，使用数据库状态:`, error);
     }
 
     // 当前数据库中的状态
@@ -176,7 +177,9 @@ export class WorkflowsTaskOrchestrator implements TaskOrchestratorAdapter {
         mappedStatus === TaskStatus.CANCELLED ||
         mappedStatus === TaskStatus.PARTIAL;
 
-      if (isDbRunning && isFinalStatus) {
+      const isLatestWorkflowInstance = workflowStatus.id === workflowInstanceId;
+
+      if (isDbRunning && isFinalStatus && isLatestWorkflowInstance) {
         try {
           const finishedAtMs = workflowStatus.output?.finishedAt
             ? new Date(workflowStatus.output.finishedAt).getTime()
@@ -200,22 +203,24 @@ export class WorkflowsTaskOrchestrator implements TaskOrchestratorAdapter {
         }
       }
 
-      const effectiveStatus =
-        dbStatus === TaskStatus.CANCELLED ? TaskStatus.CANCELLED : mappedStatus;
+      const isDbFinalStatus =
+        dbStatus === TaskStatus.COMPLETED ||
+        dbStatus === TaskStatus.FAILED ||
+        dbStatus === TaskStatus.CANCELLED ||
+        dbStatus === TaskStatus.PARTIAL;
+      const effectiveStatus = isDbFinalStatus ? dbStatus as TaskStatus : mappedStatus;
 
       return {
         jobId: taskRecord.task_id as string,
         taskType: taskRecord.task_type as string,
         status: effectiveStatus,
         stats: {
+          ...dbStats,
           totalItems: workflowStatus.output?.totalItems ?? dbStats.totalItems,
           processedItems: workflowStatus.output?.processedItems ?? dbStats.processedItems,
           successCount: workflowStatus.output?.successCount ?? dbStats.successCount,
           failedCount: workflowStatus.output?.failedCount ?? dbStats.failedCount,
           skippedCount: workflowStatus.output?.skippedCount ?? dbStats.skippedCount,
-          totalBytes: dbStats.totalBytes,
-          bytesTransferred: dbStats.bytesTransferred,
-          itemResults: dbStats.itemResults,
         },
         createdAt: new Date(taskRecord.created_at as number),
         startedAt: taskRecord.started_at ? new Date(taskRecord.started_at as number) : undefined,
@@ -253,7 +258,11 @@ export class WorkflowsTaskOrchestrator implements TaskOrchestratorAdapter {
   /** 取消作业 - 终止 Workflow 实例 + 更新数据库状态 */
   async cancelJob(jobId: string): Promise<void> {
     try {
-      const instance = await this.env.JOB_WORKFLOW.get(jobId);
+      const row = await this.env.DB.prepare(`
+        SELECT workflow_instance_id FROM ${DbTables.TASKS} WHERE task_id = ?
+      `).bind(jobId).first();
+      const workflowInstanceId = (row?.workflow_instance_id as string | null) || jobId;
+      const instance = await this.env.JOB_WORKFLOW.get(workflowInstanceId);
       await instance.terminate();
     } catch (error) {
       console.log(`终止 Workflow ${jobId} 失败:`, error);

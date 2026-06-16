@@ -191,6 +191,8 @@ export default {
 
     taskType: {
       copy: 'Copy',
+      delete: 'Delete',
+      move: 'Move',
       fs_index_rebuild: 'Index Rebuild',
       fs_index_apply_dirty: 'Apply Index Dirty',
       unknown: 'Unknown Task',

@@ -150,6 +150,16 @@ export async function batchDeleteItems(pathsOrPath) {
 }
 
 /**
+ * 批量移动文件或目录（统一任务模式）
+ * @param {Array<{sourcePath:string,targetPath:string}>} items
+ * @param {Object} options
+ * @returns {Promise<Object>} 移动作业响应
+ */
+export async function batchMoveItems(items, options = {}) {
+  return post(`/fs/batch-move`, { items, options });
+}
+
+/**
  * 重命名文件或目录
  * @param {string} oldPath 旧路径
  * @param {string} newPath 新路径

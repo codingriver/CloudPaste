@@ -74,6 +74,7 @@ export interface CopyTaskPayload {
   options?: {
     skipExisting?: boolean;
     maxConcurrency?: number;
+    maxDirectoryCopyObjects?: number;
     retryPolicy?: RetryPolicy;
   };
 }
@@ -118,6 +119,7 @@ export interface CreateCopyJobParams {
   options?: {
     skipExisting?: boolean;
     maxConcurrency?: number;
+    maxDirectoryCopyObjects?: number;
     retryPolicy?: RetryPolicy;
   };
 }

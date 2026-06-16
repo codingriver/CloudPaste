@@ -30,6 +30,31 @@ const RETRYABLE_STATUS_CODES = [
   408, 425, 429, 500, 502, 503, 504, 507, 509
 ];
 
+function collectErrorMessages(error: any, seen = new Set<any>()): string[] {
+  if (!error || seen.has(error)) {
+    return [];
+  }
+
+  seen.add(error);
+
+  const messages: string[] = [];
+  const append = (value: unknown) => {
+    if (typeof value === 'string' && value.trim()) {
+      messages.push(value);
+    }
+  };
+
+  append(error?.message);
+  append(error?.details?.cause);
+  append(error?.details?.message);
+
+  return [
+    ...messages,
+    ...collectErrorMessages(error?.cause, seen),
+    ...collectErrorMessages(error?.originalError, seen),
+  ];
+}
+
 /** 判断错误是否可重试 - 基于 HTTP 状态码、错误代码和消息模式匹配 */
 export function isRetryableError(error: any): boolean {
   if (!error) return false;
@@ -37,8 +62,12 @@ export function isRetryableError(error: any): boolean {
   // Cloudflare Workflows 平台级限流错误（单次调用子请求超限）：
   // 此类错误在当前 Worker/Workflow 调用中继续重试没有意义，应该直接视为不可重试，
   // 由上层通过新的调用或人工干预进行恢复。
-  const rawMessage = String(error?.message || '').toUpperCase();
-  if (rawMessage.includes('TOO MANY API REQUESTS BY SINGLE WORKER INVOCATION')) {
+  const rawMessages = collectErrorMessages(error).join(' ').toUpperCase();
+  if (
+    rawMessages.includes('TOO MANY API REQUESTS BY SINGLE WORKER INVOCATION') ||
+    rawMessages.includes('TOO MANY SUBREQUESTS BY SINGLE WORKER INVOCATION') ||
+    rawMessages.includes('SUBREQUESTS BY SINGLE WORKER INVOCATION')
+  ) {
     return false;
   }
 

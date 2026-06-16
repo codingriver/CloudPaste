@@ -5,6 +5,8 @@
  */
 
 export { CopyTaskHandler } from './CopyTaskHandler.js';
+export { DeleteTaskHandler } from './DeleteTaskHandler.js';
+export { MoveTaskHandler } from './MoveTaskHandler.js';
 export { FsIndexRebuildTaskHandler } from './FsIndexRebuildTaskHandler.js';
 export { FsIndexApplyDirtyTaskHandler } from './FsIndexApplyDirtyTaskHandler.js';
 

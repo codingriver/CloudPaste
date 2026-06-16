@@ -65,9 +65,38 @@ const props = defineProps({
 
 const { t } = useI18n()
 
-// 已知总数模式：totalItems > 0
+const directoryProgress = computed(() => {
+  const operation = props.task.stats?.operationProgress
+  if (['directory_copy', 'directory_delete', 'directory_move'].includes(operation?.mode)) {
+    return operation
+  }
+
+  const direct = props.task.stats?.directoryProgress
+  if (direct?.mode === 'directory_copy') return direct
+
+  const firstDetails = props.task.stats?.itemResults?.find((item) => (
+    item?.meta?.copyDetails || item?.meta?.deleteDetails || item?.meta?.moveDetails
+  ))
+  const details = firstDetails?.meta?.copyDetails || firstDetails?.meta?.deleteDetails || firstDetails?.meta?.moveDetails
+  if (!details) return null
+
+  const processedObjects = Number(details.processed || details.processedObjects || 0)
+  const totalObjects = Number(details.totalObjects || processedObjects || 0)
+  if (processedObjects <= 0 && totalObjects <= 0) return null
+
+  return {
+    processedObjects,
+    totalObjects,
+    successObjects: Number(details.success || details.successObjects || 0),
+    failedObjects: Number(details.failed || details.failedObjects || 0),
+    skippedObjects: Number(details.skipped || details.skippedObjects || 0),
+    dedupedObjects: Number(details.deduped || details.dedupedObjects || 0),
+  }
+})
+
+// 已知总数模式：目录内部对象总数优先，其次才是顶层任务项总数
 const hasKnownTotal = computed(() => {
-  return props.task.stats && props.task.stats.totalItems && props.task.stats.totalItems > 0
+  return total.value > 0
 })
 
 // 动态模式：没有总数但有处理统计或 itemResults
@@ -85,11 +114,11 @@ const hasDynamicStats = computed(() => {
 })
 
 // 基础统计
-const total = computed(() => props.task.stats?.totalItems || 0)
-const processed = computed(() => props.task.stats?.processedItems || 0)
-const success = computed(() => props.task.stats?.successCount || 0)
-const failed = computed(() => props.task.stats?.failedCount || 0)
-const skipped = computed(() => props.task.stats?.skippedCount || 0)
+const total = computed(() => directoryProgress.value?.totalObjects || props.task.stats?.totalItems || 0)
+const processed = computed(() => directoryProgress.value?.processedObjects || props.task.stats?.processedItems || 0)
+const success = computed(() => directoryProgress.value?.successObjects || props.task.stats?.successCount || 0)
+const failed = computed(() => directoryProgress.value?.failedObjects || props.task.stats?.failedCount || 0)
+const skipped = computed(() => directoryProgress.value?.skippedObjects || props.task.stats?.skippedCount || 0)
 const itemResultsCount = computed(() => {
   const results = props.task.stats?.itemResults
   return Array.isArray(results) ? results.length : 0
