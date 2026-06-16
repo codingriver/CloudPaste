@@ -14,7 +14,7 @@
 
     <!-- 主内容区域 - 混合导航模式，响应侧边栏收缩状态 -->
     <main
-      class="w-full md:w-auto md:fixed md:left-64 md:top-16 md:right-0 md:bottom-0 md:overflow-y-auto focus:outline-none z-40 transition-all duration-300"
+      class="w-full md:w-auto md:fixed md:top-16 md:right-0 md:bottom-0 md:overflow-y-auto focus:outline-none z-10 transition-all duration-300"
       :class="[sidebarCollapsed ? 'md:left-16' : 'md:left-64', darkMode ? 'bg-gray-900' : 'bg-white md:bg-gray-100']"
     >
       <!-- 背景颜色包装器 -->
