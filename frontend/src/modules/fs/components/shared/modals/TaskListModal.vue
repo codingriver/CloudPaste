@@ -249,6 +249,7 @@ import { formatRelativeTime } from '@/utils/timeUtils.js';
 import { formatFileSize } from '@/utils/fileUtils.js';
 import { IconCheckCircle, IconChevronDown, IconClose, IconExclamationSolid, IconExternalLink, IconRefresh, IconTaskList, IconXCircle } from '@/components/icons';
 import { createLogger } from '@/utils/logger.js';
+import { getItemResults, getObjectProgress, getPathProgress } from '@/modules/admin/utils/taskProgress.js';
 
 const { t } = useI18n();
 const log = createLogger('TaskListModal');
@@ -354,20 +355,28 @@ const transformTaskData = (jobData) => {
   const processed = jobData.stats?.processedItems || 0;
   const bytesTransferred = jobData.stats?.bytesTransferred || 0;
   const totalBytes = jobData.stats?.totalBytes || 0;
+  const itemResults = getItemResults(jobData);
+  const objectProgress = getObjectProgress(jobData);
+  const pathProgress = getPathProgress(jobData);
+  const isBatchPathMode = ['delete', 'move'].includes(jobData.taskType) && itemResults.length > 1;
+  const useDirectoryProgress = directoryProgress?.totalObjects > 0 && !isBatchPathMode;
 
   // 智能进度计算
   let progress = 0;
   if (totalBytes > 0 && bytesTransferred > 0) {
     progress = Math.round((bytesTransferred / totalBytes) * 100);
-  } else if (directoryProgress?.totalObjects > 0) {
+  } else if (objectProgress.knownTotal && objectProgress.total > 0) {
+    progress = Math.round((objectProgress.processed / objectProgress.total) * 100);
+  } else if (useDirectoryProgress) {
     progress = Math.round((directoryProgress.processedObjects / directoryProgress.totalObjects) * 100);
+  } else if (isBatchPathMode && pathProgress.total > 0) {
+    progress = Math.round((pathProgress.processed / pathProgress.total) * 100);
   } else if (total > 0) {
     progress = Math.round((processed / total) * 100);
   }
   progress = Math.min(100, Math.max(0, progress));
 
   // 获取文件处理结果列表
-  const itemResults = jobData.stats?.itemResults || [];
   const firstFailedItem = itemResults.find(item => item.status === 'failed');
 
   return {
@@ -376,7 +385,11 @@ const transformTaskData = (jobData) => {
     type: jobData.taskType,
     status: jobData.status,
     progress,
-    progressText: directoryProgress
+    progressText: objectProgress.knownTotal
+      ? `处理文件 ${objectProgress.processed}/${objectProgress.total || objectProgress.processed}`
+      : isBatchPathMode
+      ? `处理路径 ${pathProgress.processed}/${pathProgress.total}`
+      : directoryProgress
       ? `处理对象 ${directoryProgress.processedObjects}/${directoryProgress.totalObjects}`
       : (total > 0 ? `处理项目 ${processed}/${total}` : ''),
     batchText: directoryProgress?.currentBatch

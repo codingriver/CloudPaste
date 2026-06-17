@@ -55,6 +55,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getItemResults, getObjectProgress, getPathProgress } from '@/modules/admin/utils/taskProgress'
 
 const props = defineProps({
   task: {
@@ -65,7 +66,23 @@ const props = defineProps({
 
 const { t } = useI18n()
 
+const itemResults = computed(() => {
+  return getItemResults(props.task)
+})
+
+const isBatchPathMode = computed(() => {
+  return ['delete', 'move'].includes(props.task.taskType) && itemResults.value.length > 1
+})
+
+const pathStatusCounts = computed(() => {
+  return getPathProgress(props.task)
+})
+
+const objectProgress = computed(() => getObjectProgress(props.task))
+
 const directoryProgress = computed(() => {
+  if (isBatchPathMode.value) return null
+
   const operation = props.task.stats?.operationProgress
   if (['directory_copy', 'directory_delete', 'directory_move'].includes(operation?.mode)) {
     return operation
@@ -114,35 +131,54 @@ const hasDynamicStats = computed(() => {
 })
 
 // 基础统计
-const total = computed(() => directoryProgress.value?.totalObjects || props.task.stats?.totalItems || 0)
-const processed = computed(() => directoryProgress.value?.processedObjects || props.task.stats?.processedItems || 0)
-const success = computed(() => directoryProgress.value?.successObjects || props.task.stats?.successCount || 0)
-const failed = computed(() => directoryProgress.value?.failedObjects || props.task.stats?.failedCount || 0)
-const skipped = computed(() => directoryProgress.value?.skippedObjects || props.task.stats?.skippedCount || 0)
+const total = computed(() => {
+  if (objectProgress.value.knownTotal) return objectProgress.value.total
+  if (isBatchPathMode.value) return pathStatusCounts.value.total
+  return directoryProgress.value?.totalObjects || props.task.stats?.totalItems || 0
+})
+const processed = computed(() => {
+  if (objectProgress.value.knownTotal) return objectProgress.value.processed
+  if (isBatchPathMode.value) return pathStatusCounts.value.processed
+  return directoryProgress.value?.processedObjects || props.task.stats?.processedItems || 0
+})
+const success = computed(() => {
+  if (objectProgress.value.knownTotal) return objectProgress.value.success + objectProgress.value.deduped
+  if (isBatchPathMode.value) return pathStatusCounts.value.success
+  return directoryProgress.value?.successObjects || props.task.stats?.successCount || 0
+})
+const failed = computed(() => {
+  if (objectProgress.value.knownTotal) return objectProgress.value.failed
+  if (isBatchPathMode.value) return pathStatusCounts.value.failed
+  return directoryProgress.value?.failedObjects || props.task.stats?.failedCount || 0
+})
+const skipped = computed(() => {
+  if (objectProgress.value.knownTotal) return objectProgress.value.skipped
+  if (isBatchPathMode.value) return pathStatusCounts.value.skipped
+  return directoryProgress.value?.skippedObjects || props.task.stats?.skippedCount || 0
+})
 const itemResultsCount = computed(() => {
-  const results = props.task.stats?.itemResults
-  return Array.isArray(results) ? results.length : 0
+  return itemResults.value.length
 })
 
 // 已知总数模式的百分比计算
 const progressPercent = computed(() => {
   if (total.value === 0) return 0
-  return Math.round((processed.value / total.value) * 100)
+  return Math.min(100, Math.round((processed.value / total.value) * 100))
 })
 
 const successPercent = computed(() => {
   if (total.value === 0) return 0
-  return (success.value / total.value) * 100
+  return Math.min(100, (success.value / total.value) * 100)
 })
 
 const skippedPercent = computed(() => {
   if (total.value === 0) return 0
-  return (skipped.value / total.value) * 100
+  return Math.min(100, (skipped.value / total.value) * 100)
 })
 
 const failedPercent = computed(() => {
   if (total.value === 0) return 0
-  return (failed.value / total.value) * 100
+  return Math.min(100, (failed.value / total.value) * 100)
 })
 
 // 动态模式的百分比计算（基于 processedItems 或 successCount+failedCount+skippedCount）

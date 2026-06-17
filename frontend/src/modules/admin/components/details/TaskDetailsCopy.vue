@@ -20,12 +20,39 @@
       </button>
     </div>
 
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-xs">
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">路径进度</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ pathProgress.processed }}/{{ pathProgress.total || pathProgress.processed }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">文件进度</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ objectProgress.processed }}/{{ objectProgress.total || objectProgress.processed }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">路径 成功/失败/跳过</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ pathProgress.success }}/{{ pathProgress.failed }}/{{ pathProgress.skipped }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">文件 成功/失败/跳过</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ objectProgress.success + objectProgress.deduped }}/{{ objectProgress.failed }}/{{ objectProgress.skipped }}
+        </div>
+      </div>
+    </div>
+
     <div
       v-if="directoryProgress"
       class="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border border-blue-100 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/20 px-3 py-2 text-xs"
     >
       <div>
-        <div class="text-gray-500 dark:text-gray-400">处理对象</div>
+        <div class="text-gray-500 dark:text-gray-400">当前目录对象</div>
         <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
           {{ directoryProgress.processedObjects }}/{{ directoryProgress.totalObjects }}
         </div>
@@ -233,6 +260,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getObjectProgress, getPathProgress } from '@/modules/admin/utils/taskProgress'
 import {
   IconCopy as CopyIcon,
   IconCheck,
@@ -274,6 +302,9 @@ const failedItems = computed(() => {
 })
 
 const failedCount = computed(() => failedItems.value.length)
+
+const pathProgress = computed(() => getPathProgress(props.task))
+const objectProgress = computed(() => getObjectProgress(props.task))
 
 const getCopyDetails = (item) => item?.meta?.copyDetails || null
 

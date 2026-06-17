@@ -8,17 +8,29 @@
       </h3>
     </div>
 
-    <div class="grid grid-cols-2 gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-xs">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-xs">
       <div>
         <div class="text-gray-500 dark:text-gray-400">路径进度</div>
         <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-          {{ processedItems }}/{{ totalItems || processedItems }}
+          {{ pathProgress.processed }}/{{ pathProgress.total || pathProgress.processed }}
         </div>
       </div>
       <div>
-        <div class="text-gray-500 dark:text-gray-400">成功/失败/跳过</div>
+        <div class="text-gray-500 dark:text-gray-400">文件进度</div>
         <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-          {{ successCount }}/{{ failedCount }}/{{ skippedCount }}
+          {{ objectProgress.processed }}/{{ objectProgress.total || objectProgress.processed }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">路径 成功/失败/跳过</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ pathProgress.success }}/{{ pathProgress.failed }}/{{ pathProgress.skipped }}
+        </div>
+      </div>
+      <div>
+        <div class="text-gray-500 dark:text-gray-400">文件 成功/失败/跳过</div>
+        <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+          {{ objectProgress.success + objectProgress.deduped }}/{{ objectProgress.failed }}/{{ objectProgress.skipped }}
         </div>
       </div>
     </div>
@@ -170,6 +182,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getObjectProgress, getPathProgress } from '@/modules/admin/utils/taskProgress'
 import {
   IconCheck,
   IconClose,
@@ -194,11 +207,11 @@ const itemResults = computed(() => props.task.stats?.itemResults || [])
 const stats = computed(() => props.task.stats || {})
 const isDeleteTask = computed(() => props.task.taskType === 'delete')
 const headerIcon = computed(() => isDeleteTask.value ? IconTrash : IconSync)
-const totalItems = computed(() => Number(stats.value.totalItems || 0))
-const processedItems = computed(() => Number(stats.value.processedItems || 0))
-const successCount = computed(() => Number(stats.value.successCount || 0))
-const failedCount = computed(() => Number(stats.value.failedCount || 0))
-const skippedCount = computed(() => Number(stats.value.skippedCount || 0))
+const pathProgress = computed(() => {
+  return getPathProgress(stats.value)
+})
+
+const objectProgress = computed(() => getObjectProgress(stats.value))
 
 const operationProgress = computed(() => {
   const progress = stats.value.operationProgress

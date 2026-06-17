@@ -190,7 +190,7 @@ export class DeleteTaskHandler implements TaskHandler {
         };
 
         const operationProgress = buildOperationProgress(nextDirectory, chunkSize, currentIndex);
-        const nextTotalItems = Math.max(Number(currentStats.totalItems || payload.paths.length), payload.paths.length - 1 + nextDirectory.totalObjects);
+        const nextTotalItems = Math.max(Number(currentStats.totalItems || payload.paths.length), payload.paths.length);
 
         if (chunkResult?.done) {
           const itemFailed = nextDirectory.failed > 0;

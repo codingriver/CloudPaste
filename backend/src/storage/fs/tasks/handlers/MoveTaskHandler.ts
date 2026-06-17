@@ -251,7 +251,7 @@ export class MoveTaskHandler implements TaskHandler {
           }
 
           await context.updateProgress(job.jobId, {
-            totalItems: Math.max(Number(currentStats.totalItems || payload.items.length), payload.items.length - 1 + nextDirectory.totalObjects * 2),
+            totalItems: Math.max(Number(currentStats.totalItems || payload.items.length), payload.items.length),
             successCount: baseSuccess + Number(chunkResult?.success || 0) + Number(chunkResult?.deduped || 0),
             failedCount: baseFailed + Number(chunkResult?.failed || 0),
             skippedCount: baseSkipped + Number(chunkResult?.skipped || 0),

@@ -103,9 +103,36 @@ function buildDirectoryProgress(activeDirectory: Record<string, any>, chunkSize:
   };
 }
 
+function subtractActiveDirectoryStats(base: TaskStats, activeDirectory?: Record<string, any> | null): {
+  processedItems: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+} {
+  if (!activeDirectory || activeDirectory.mode !== "cross_mount_directory") {
+    return {
+      processedItems: Number(base.processedItems || 0),
+      successCount: Number(base.successCount || 0),
+      failedCount: Number(base.failedCount || 0),
+      skippedCount: Number(base.skippedCount || 0),
+    };
+  }
+
+  return {
+    processedItems: Math.max(0, Number(base.processedItems || 0) - Number(activeDirectory.processed || 0)),
+    successCount: Math.max(0, Number(base.successCount || 0) - Number(activeDirectory.success || 0)),
+    failedCount: Math.max(0, Number(base.failedCount || 0) - Number(activeDirectory.failed || 0)),
+    skippedCount: Math.max(0, Number(base.skippedCount || 0) - Number(activeDirectory.skipped || 0)),
+  };
+}
+
 function isInvocationLimitError(error: any): boolean {
   const message = String(error?.message || error?.details?.cause || error?.cause?.message || error || "");
   return /too many subrequests|subrequest|invocation/i.test(message);
+}
+
+function getCopyResultErrorMessage(result: any): string {
+  return String(result?.message || result?.error || result?.details?.cause || result?.cause || "");
 }
 
 function normalizeDirectoryPath(path: string): string {
@@ -133,10 +160,10 @@ async function executeCrossMountDirectoryChunk(params: {
   const { fileSystem, item, job, userId, userType, options } = params;
   const sourceBase = normalizeDirectoryPath(item.sourcePath);
   const targetBase = normalizeDirectoryPath(item.targetPath);
-  const configured = Math.max(1, Math.floor(Number(params.configuredChunkSize || 1)));
-  // 跨存储单文件复制通常至少包含读取、写入和元数据更新，多对象同 invocation 风险很高。
-  const maxEntries = Math.max(1, Math.min(configured, 3));
-  const active = params.activeDirectory?.mode === "cross_mount_directory"
+  // 跨存储单文件复制通常至少包含源读取、目标写入、元数据/索引更新。
+  // 实测多文件同 invocation 容易在后续 Workflow 接力前耗尽子请求预算，因此固定为 1。
+  const maxEntries = 1;
+  const active: Record<string, any> = params.activeDirectory?.mode === "cross_mount_directory"
     ? { ...params.activeDirectory }
     : {
         mode: "cross_mount_directory",
@@ -150,7 +177,8 @@ async function executeCrossMountDirectoryChunk(params: {
         success: 0,
         failed: 0,
         skipped: 0,
-        failedItems: [],
+        failedItems: [] as any[],
+        invocationLimitReachedCount: 0,
         lastError: null,
       };
 
@@ -174,6 +202,7 @@ async function executeCrossMountDirectoryChunk(params: {
       } catch (error: any) {
         if (isInvocationLimitError(error)) {
           active.lastError = error?.message || String(error);
+          active.invocationLimitReachedCount = Number(active.invocationLimitReachedCount || 0) + 1;
           return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
         }
         active.failed += 1;
@@ -190,6 +219,7 @@ async function executeCrossMountDirectoryChunk(params: {
       } catch (error: any) {
         if (isInvocationLimitError(error)) {
           active.lastError = error?.message || String(error);
+          active.invocationLimitReachedCount = Number(active.invocationLimitReachedCount || 0) + 1;
           return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
         }
         active.failed += 1;
@@ -240,8 +270,14 @@ async function executeCrossMountDirectoryChunk(params: {
       if (result?.status === "skipped" || result?.skipped === true) {
         active.skipped += 1;
       } else if (result?.status === "failed") {
+        const resultMessage = getCopyResultErrorMessage(result);
+        if (isInvocationLimitError(resultMessage)) {
+          active.lastError = resultMessage || "Worker invocation limit reached";
+          active.invocationLimitReachedCount = Number(active.invocationLimitReachedCount || 0) + 1;
+          return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
+        }
         active.failed += 1;
-        active.failedItems = appendLimitedFailedItems(active.failedItems, [{ source: entryPath, target: targetPath, message: result?.message || result?.error || "复制失败" }]);
+        active.failedItems = appendLimitedFailedItems(active.failedItems, [{ source: entryPath, target: targetPath, message: resultMessage || "复制失败" }]);
       } else {
         active.success += 1;
       }
@@ -251,6 +287,7 @@ async function executeCrossMountDirectoryChunk(params: {
     } catch (error: any) {
       if (isInvocationLimitError(error)) {
         active.lastError = error?.message || error?.details?.cause || String(error);
+        active.invocationLimitReachedCount = Number(active.invocationLimitReachedCount || 0) + 1;
         return { done: false, activeDirectory: active, maxEntries, invocationLimitReached: true };
       }
       active.failed += 1;
@@ -590,6 +627,7 @@ export class CopyTaskHandler implements TaskHandler {
 
       if (canChunkCrossMountDirectory) {
         const activeDirectory = checkpoint.activeDirectory || null;
+        const baseBeforeCurrentDirectory = subtractActiveDirectoryStats(currentStats, activeDirectory);
         const chunkResult = await executeCrossMountDirectoryChunk({
           fileSystem,
           item,
@@ -624,14 +662,15 @@ export class CopyTaskHandler implements TaskHandler {
           const detailFailed = Number(nextDirectory.failed || 0);
           const detailSkipped = Number(nextDirectory.skipped || 0);
           itemResults[currentIndex].status = detailFailed > 0 ? "failed" : "success";
-          itemResults[currentIndex].error = detailFailed > 0 ? nextDirectory.failedItems?.[0]?.message || `跨存储目录复制存在 ${detailFailed} 个失败项` : undefined;
+          const firstFailedItem = Array.isArray(nextDirectory.failedItems) ? nextDirectory.failedItems[0] : null;
+          itemResults[currentIndex].error = detailFailed > 0 ? firstFailedItem?.message || `跨存储目录复制存在 ${detailFailed} 个失败项` : undefined;
 
           await context.updateProgress(job.jobId, {
-            processedItems: baseProcessed + Math.max(1, detailSuccess + detailFailed + detailSkipped),
+            processedItems: baseBeforeCurrentDirectory.processedItems + Math.max(1, detailSuccess + detailFailed + detailSkipped),
             totalItems: Math.max(observedTotal, payload.items.length - 1 + detailSuccess + detailFailed + detailSkipped),
-            successCount: baseSuccess + detailSuccess,
-            failedCount: baseFailed + detailFailed,
-            skippedCount: baseSkipped + detailSkipped,
+            successCount: baseBeforeCurrentDirectory.successCount + detailSuccess,
+            failedCount: baseBeforeCurrentDirectory.failedCount + detailFailed,
+            skippedCount: baseBeforeCurrentDirectory.skippedCount + detailSkipped,
             directoryProgress: {
               ...directoryProgress,
               totalObjects: Number(nextDirectory.processed || 0),
@@ -651,11 +690,11 @@ export class CopyTaskHandler implements TaskHandler {
         }
 
         await context.updateProgress(job.jobId, {
-          processedItems: baseProcessed + Number(nextDirectory.processed || 0),
+          processedItems: baseBeforeCurrentDirectory.processedItems + Number(nextDirectory.processed || 0),
           totalItems: observedTotal,
-          successCount: baseSuccess + Number(nextDirectory.success || 0),
-          failedCount: baseFailed + Number(nextDirectory.failed || 0),
-          skippedCount: baseSkipped + Number(nextDirectory.skipped || 0),
+          successCount: baseBeforeCurrentDirectory.successCount + Number(nextDirectory.success || 0),
+          failedCount: baseBeforeCurrentDirectory.failedCount + Number(nextDirectory.failed || 0),
+          skippedCount: baseBeforeCurrentDirectory.skippedCount + Number(nextDirectory.skipped || 0),
           directoryProgress,
           itemResults,
           copyCheckpoint: {
