@@ -102,7 +102,7 @@ export default {
     uploadSubtitle: "文件上传",
     pasteViewSubtitle: "查看分享",
     fileViewSubtitle: "文件预览",
-    mountExplorerSubtitle: "挂载浏览",
+    mountExplorerSubtitle: "网盘管理",
     notFoundSubtitle: "页面未找到",
     // 管理模块标题
     adminModules: {
@@ -126,7 +126,7 @@ export default {
   nav: {
     home: "文本编辑",
     upload: "文件上传",
-    mountExplorer: "挂载浏览",
+    mountExplorer: "网盘管理",
     admin: "管理面板",
     menu: "主菜单",
   },

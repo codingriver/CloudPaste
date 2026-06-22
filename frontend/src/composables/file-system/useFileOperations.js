@@ -121,6 +121,33 @@ export function useFileOperations() {
     }
   };
 
+  // ===== 创建文本文件 =====
+
+  /**
+   * 创建 UTF-8 文本文件
+   * @param {string} parentPath
+   * @param {string} fileName
+   * @param {string} [content]
+   * @returns {Promise<FileOperationResult>}
+   */
+  const createTextFile = async (parentPath, fileName, content = "") => {
+    try {
+      loading.value = true;
+      error.value = null;
+
+      const fullPath = parentPath.endsWith("/") ? `${parentPath}${fileName}` : `${parentPath}/${fileName}`;
+
+      await fsService.updateFile(fullPath, content);
+      return { success: true, message: t("mount.messages.createTextFileSuccess") };
+    } catch (err) {
+      log.error("创建文本文件失败:", err);
+      error.value = /** @type {any} */ (err)?.message;
+      return { success: false, message: error.value || t("mount.messages.createTextFileFailed") };
+    } finally {
+      loading.value = false;
+    }
+  };
+
   // ===== 批量删除 =====
 
   /**
@@ -233,6 +260,7 @@ export function useFileOperations() {
     downloadFile,
     renameItem,
     createFolder,
+    createTextFile,
     batchDeleteItems,
     getFileLink,
     clearError,

@@ -4,6 +4,7 @@
     :class="[
       isSelected ? 'file-item--selected' : '',
       isContextHighlight && !isSelected ? 'file-item--context-highlight' : '',
+      isProcessing ? 'file-item--processing' : '',
       isEntering && animationsEnabled ? 'file-item--entering' : '',
       darkMode ? 'file-item--dark' : 'file-item--light'
     ]"
@@ -49,6 +50,13 @@
           :title="storageBackendBadgeTitle"
         >
           {{ storageBackendBadge }}
+        </span>
+        <span
+          v-if="isProcessing"
+          class="file-item__processing-badge"
+          :class="darkMode ? 'file-item__processing-badge--dark' : 'file-item__processing-badge--light'"
+        >
+          {{ t("mount.fileItem.processing") }}
         </span>
       </div>
       <!-- 移动端文件大小显示 -->
@@ -102,12 +110,14 @@
           <IconLink class="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true" />
         </button>
 
-        <!-- 重命名按钮 -->
+        <!-- 编辑按钮（仅支持在线编辑的文件显示） -->
         <button
-          v-if="!item.isDirectory"
-          @click.stop="$emit('rename', item)"
+          v-if="canEditItem"
+          @click.stop="$emit('edit', item)"
           class="file-item__action-btn w-8 h-8 rounded-full flex items-center justify-center transition-all bg-transparent text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transform hover:scale-110"
-          :title="t('mount.fileItem.rename')"
+          :class="isProcessing ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''"
+          :disabled="isProcessing"
+          :title="t('mount.fileItem.edit')"
         >
           <IconRename class="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true" />
         </button>
@@ -116,6 +126,8 @@
         <button
           @click.stop="$emit('delete', item)"
           class="file-item__action-btn w-8 h-8 rounded-full flex items-center justify-center transition-all bg-transparent text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transform hover:scale-110"
+          :class="isProcessing ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''"
+          :disabled="isProcessing"
           :title="t('mount.fileItem.delete')"
         >
           <IconDelete class="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true" />
@@ -132,6 +144,7 @@ import { IconDelete, IconDownload, IconLink, IconRename } from "@/components/ico
 import { formatFileSize } from "@/utils/fileUtils.js";
 import { getFileIcon as getFileIconSvg } from "@/utils/fileTypeIcons.js";
 import { formatDateTime } from "@/utils/timeUtils.js";
+import { DEFAULT_TEXT_EDITABLE_TYPES, isFilenameTextEditable, loadTextEditableTypes } from "@/utils/textEditableTypes.js";
 
 const { t } = useI18n();
 
@@ -142,6 +155,7 @@ const props = defineProps({
   isSelected: { type: Boolean, default: false },
   // 右键菜单高亮状态（临时高亮，不是勾选选中）
   isContextHighlight: { type: Boolean, default: false },
+  isProcessing: { type: Boolean, default: false },
   currentPath: { type: String, required: true },
   index: { type: Number, default: 0 },
   animationsEnabled: { type: Boolean, default: true },
@@ -151,10 +165,15 @@ const props = defineProps({
   showActionButtons: { type: Boolean, default: true },
 });
 
-const emit = defineEmits(["click", "download", "rename", "delete", "select", "getLink", "contextmenu"]);
+const emit = defineEmits(["click", "download", "edit", "delete", "select", "getLink", "contextmenu"]);
 
 // 缓存文件图标 SVG，避免每次渲染重复计算
 const fileIcon = computed(() => getFileIconSvg(props.item, props.darkMode));
+const textEditableTypes = ref(DEFAULT_TEXT_EDITABLE_TYPES);
+const canEditItem = computed(() => {
+  if (props.item?.isDirectory) return false;
+  return isFilenameTextEditable(props.item?.name || props.item?.filename || "", textEditableTypes.value);
+});
 
 // 入场动画状态
 const isEntering = ref(true);
@@ -162,6 +181,10 @@ const enterDelay = computed(() => Math.min(props.index * 30, 300));
 
 // 组件挂载后移除入场动画状态
 onMounted(() => {
+  loadTextEditableTypes().then((types) => {
+    textEditableTypes.value = types;
+  });
+
   if (props.animationsEnabled) {
     setTimeout(() => {
       isEntering.value = false;
@@ -353,6 +376,11 @@ const storageBackendBadgeTitle = computed(() => {
   background: var(--explorer-hover, rgba(59, 130, 246, 0.15));
 }
 
+.file-item--processing {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 /* 入场动画 */
 .file-item--entering {
   animation: fadeInScale var(--explorer-animation-duration, 200ms) var(--easing-out, cubic-bezier(0, 0, 0.2, 1)) forwards;
@@ -468,6 +496,27 @@ const storageBackendBadgeTitle = computed(() => {
   user-select: none;
 }
 
+.file-item__processing-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+}
+
+.file-item__processing-badge--light {
+  background: rgba(59, 130, 246, 0.12);
+  color: rgb(29, 78, 216);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.file-item__processing-badge--dark {
+  background: rgba(96, 165, 250, 0.15);
+  color: rgb(191, 219, 254);
+  border-color: rgba(96, 165, 250, 0.25);
+}
+
 .file-item__backend-badge--lfs {
   background: rgba(107, 114, 128, 0.12);
   color: rgb(75, 85, 99);
@@ -543,7 +592,7 @@ const storageBackendBadgeTitle = computed(() => {
 /* 桌面端：始终显示操作按钮 */
 @media (min-width: 640px) {
   .file-item__actions-inner {
-    justify-content: center;
+    justify-content: flex-end;
   }
 }
 

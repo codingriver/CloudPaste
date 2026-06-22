@@ -3,7 +3,7 @@
     <!-- 内容区域 -->
     <div class="content-area" :style="contentStyle">
       <!-- 空内容 -->
-      <div v-if="!content" class="empty-state">
+      <div v-if="!content && mode !== 'edit'" class="empty-state">
         <div class="empty-icon">📄</div>
         <p class="empty-message" :class="textClass">内容为空</p>
       </div>

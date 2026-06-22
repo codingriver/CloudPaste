@@ -145,6 +145,9 @@ export default {
     textTypesLabel: "Supported text file extensions",
     textTypesPlaceholder: "txt,htm,html,xml,java,properties,sql,js,md,json,conf,ini,vue,php,py,bat,yml,go,sh,c,cpp,h,hpp,tsx,vtt,srt,ass,rs,lrc,gitignore",
     textTypesHelp: "Comma-separated text file extensions that will be displayed using the text previewer",
+    textEditableTypesLabel: "Text extensions allowed for online editing",
+    textEditableTypesPlaceholder: "txt,md,json,yaml,yml,js,ts,css,html,htm,sh,bat,log,xml,ini,conf,properties,sql,vue,py,go,c,cpp,h,hpp,tsx,rs,gitignore",
+    textEditableTypesHelp: "Comma-separated. Matched text files will show Edit mode; saved content is written as UTF-8.",
 
     imageTypes: "Image File Types",
     imageTypesLabel: "Supported image file extensions",
@@ -260,7 +263,7 @@ export default {
         hint: "When disabled, the Upload entry is hidden and visiting /upload will redirect.",
       },
       mountExplorer: {
-        label: "Mount Explorer (/mount-explorer)",
+        label: "Drive Management (/mount-explorer)",
         hint: "When disabled, the Mount entry is hidden and visiting mount pages will redirect.",
       },
     },

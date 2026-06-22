@@ -26,6 +26,18 @@
           <IconFolderPlus size="sm" class="sm:mr-1.5" />
           <span class="hidden sm:inline">{{ t("mount.operations.createFolder") }}</span>
         </button>
+
+        <!-- 新建文本按钮 -->
+        <button
+          v-if="!isVirtual"
+          @click="createTextFile"
+          class="inline-flex items-center justify-center p-2 sm:px-4 sm:py-1.5 rounded-md sm:rounded-full transition-all duration-200 text-sm font-medium shadow-sm hover:shadow-md active:scale-95"
+          :class="darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'"
+          :title="t('mount.operations.createTextFile')"
+        >
+          <IconDocumentText size="sm" class="sm:mr-1.5" />
+          <span class="hidden sm:inline">{{ t("mount.operations.createTextFile") }}</span>
+        </button>
       </div>
 
       <!-- 右侧视图操作按钮组 -->
@@ -37,7 +49,7 @@
 
         <!-- 任务管理按钮 -->
         <button
-          @click="$emit('openTasksModal')"
+          @click="$emit('open-tasks-modal')"
           class="inline-flex items-center justify-center p-2 sm:px-4 sm:py-1.5 rounded-md sm:rounded-full transition-all duration-200 text-sm font-medium shadow-sm hover:shadow-md active:scale-95 mr-2"
           :class="darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-200'"
           :title="t('mount.operations.tasks')"
@@ -85,10 +97,14 @@
         <button
           @click="$emit('refresh')"
           class="inline-flex items-center px-3 py-1.5 rounded-md transition-colors text-sm font-medium ml-2"
-          :class="darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'"
-          :title="t('mount.operations.refresh')"
+          :class="[
+            darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700',
+            refreshing ? 'opacity-70 cursor-wait' : '',
+          ]"
+          :title="refreshing ? t('mount.operations.refreshing') : t('mount.operations.refresh')"
+          :disabled="refreshing"
         >
-          <IconRefresh size="sm" />
+          <IconRefresh size="sm" :class="{ 'animate-spin': refreshing }" />
         </button>  
       </div>
     </div>
@@ -101,6 +117,7 @@ import FileBasket from "./FileBasket.vue";
 import {
   IconUpload,
   IconFolderPlus,
+  IconDocumentText,
   IconTaskList,
   IconList,
   IconGrid,
@@ -128,23 +145,42 @@ const props = defineProps({
     type: String,
     default: "list", // 'list' | 'grid' | 'gallery'
   },
+  refreshing: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(["upload", "createFolder", "refresh", "changeViewMode", "openUploadModal", "openTasksModal", "task-created", "show-message"]);
+const emit = defineEmits([
+  "upload",
+  "create-folder",
+  "create-text-file",
+  "refresh",
+  "change-view-mode",
+  "open-upload-modal",
+  "open-copy-modal",
+  "open-tasks-modal",
+  "task-created",
+  "show-message",
+]);
 
 // 视图模式切换
 const changeViewMode = (mode) => {
-  emit("changeViewMode", mode);
+  emit("change-view-mode", mode);
 };
 
 // 打开文件上传对话框
 const openUploadFileDialog = () => {
-  emit("openUploadModal");
+  emit("open-upload-modal");
 };
 
 // 新建文件夹
 const createFolder = () => {
-  emit("createFolder");
+  emit("create-folder");
+};
+
+// 新建文本
+const createTextFile = () => {
+  emit("create-text-file");
 };
 </script>
-

@@ -73,12 +73,14 @@
             :dark-mode="darkMode"
             :view-mode="viewMode"
             :selected-items="selectedItems"
+            :refreshing="directoryRefreshing"
             @create-folder="handleCreateFolder"
+            @create-text-file="handleCreateTextFile"
             @refresh="handleRefresh"
             @change-view-mode="handleViewModeChange"
-            @openUploadModal="handleOpenUploadModal"
-            @openCopyModal="handleBatchCopy"
-            @openTasksModal="handleOpenTasksModal"
+            @open-upload-modal="handleOpenUploadModal"
+            @open-copy-modal="handleBatchCopy"
+            @open-tasks-modal="handleOpenTasksModal"
             @task-created="handleTaskCreated"
             @show-message="handleShowMessage"
           />
@@ -110,6 +112,20 @@
         @copy-started="handleCopyStarted"
       />
 
+      <!-- 移动弹窗 -->
+      <CopyModal
+        v-if="hasEverOpenedMoveModal"
+        mode="move"
+        :is-open="isMoveModalOpen"
+        :dark-mode="darkMode"
+        :selected-items="moveModalItems"
+        :source-path="currentPath"
+        :is-admin="isAdmin"
+        :api-key-info="apiKeyInfo"
+        @close="handleCloseMoveModal"
+        @move-started="handleMoveStarted"
+      />
+
       <!-- 任务列表弹窗 -->
       <TaskListModal
         v-if="hasEverOpenedTasksModal"
@@ -135,6 +151,25 @@
         @confirm="handleCreateFolderConfirm"
         @cancel="handleCreateFolderCancel"
         @close="showCreateFolderDialog = false"
+      />
+
+      <!-- 新建文本弹窗 -->
+      <InputDialog
+        :is-open="showCreateTextFileDialog"
+        :title="t('mount.createTextFile.title')"
+        :description="t('mount.createTextFile.enterName')"
+        :label="t('mount.createTextFile.fileName')"
+        :initial-value="t('mount.createTextFile.defaultName')"
+        :placeholder="t('mount.createTextFile.placeholder')"
+        :validator="validateFsItemNameDialog"
+        :confirm-text="t('mount.createTextFile.create')"
+        :cancel-text="t('mount.createTextFile.cancel')"
+        :loading="isCreatingTextFile"
+        :loading-text="t('mount.createTextFile.creating')"
+        :dark-mode="darkMode"
+        @confirm="handleCreateTextFileConfirm"
+        @cancel="handleCreateTextFileCancel"
+        @close="showCreateTextFileDialog = false"
       />
 
       <!-- 右键菜单重命名弹窗 -->
@@ -197,6 +232,55 @@
         </template>
       </ConfirmDialog>
 
+      <Teleport to="body">
+        <div
+          v-if="showUnsavedPreviewDialog"
+          class="fixed inset-0 z-[75] overflow-auto bg-black bg-opacity-50 flex items-center justify-center p-4"
+          @click="handleCancelClosePreview"
+        >
+          <div class="relative w-full max-w-md p-6 rounded-lg shadow-xl" :class="darkMode ? 'bg-gray-800' : 'bg-white'" @click.stop>
+            <div class="mb-5">
+              <h3 class="text-lg font-semibold" :class="darkMode ? 'text-gray-100' : 'text-gray-900'">
+                {{ t("mount.filePreview.unsavedChangesTitle") }}
+              </h3>
+              <p class="text-sm mt-2" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
+                {{ t("mount.filePreview.unsavedChangesMessage") }}
+              </p>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:justify-end gap-2">
+              <button
+                type="button"
+                :disabled="isSavingPreviewBeforeClose"
+                class="px-4 py-2 rounded-md transition-colors"
+                :class="[darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100', isSavingPreviewBeforeClose ? 'opacity-50 cursor-not-allowed' : '']"
+                @click="handleDiscardAndClosePreview"
+              >
+                {{ t("mount.filePreview.discardAndBack") }}
+              </button>
+              <button
+                type="button"
+                :disabled="isSavingPreviewBeforeClose"
+                class="px-4 py-2 rounded-md transition-colors"
+                :class="[darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100', isSavingPreviewBeforeClose ? 'opacity-50 cursor-not-allowed' : '']"
+                @click="handleCancelClosePreview"
+              >
+                {{ t("mount.filePreview.keepEditing") }}
+              </button>
+              <button
+                type="button"
+                :disabled="isSavingPreviewBeforeClose"
+                class="px-4 py-2 rounded-md text-white transition-colors inline-flex items-center justify-center gap-2"
+                :class="isSavingPreviewBeforeClose ? 'bg-primary-500 cursor-not-allowed' : darkMode ? 'bg-primary-600 hover:bg-primary-700' : 'bg-primary-500 hover:bg-primary-600'"
+                @click="handleSaveAndClosePreview"
+              >
+                <IconRefresh v-if="isSavingPreviewBeforeClose" class="w-4 h-4 animate-spin" aria-hidden="true" />
+                <span>{{ isSavingPreviewBeforeClose ? t("mount.filePreview.saving") : t("mount.filePreview.saveAndBack") }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
 
       <!-- 面包屑导航 -->
       <div class="mb-4">
@@ -276,11 +360,13 @@
                   :animations-enabled="explorerSettings.settings.animationsEnabled"
                   :file-name-overflow="explorerSettings.settings.fileNameOverflow"
                   :show-action-buttons="explorerSettings.settings.showActionButtons"
+                  :processing-paths="processingPathSet"
                   :rename-loading="isDirectoryListRenaming"
                   @navigate="handleNavigate"
                   @download="handleDownload"
                   @getLink="handleGetLink"
                   @rename="handleRename"
+                  @edit="handlePreview"
                   @delete="handleDelete"
                   @preview="handlePreview"
                   @load-more="handleLoadMore"
@@ -334,6 +420,7 @@
 
               <!-- 文件预览内容 -->
               <FilePreview
+                ref="filePreviewRef"
                 :file="previewInfo || previewFile"
                 :dark-mode="darkMode"
                 :is-loading="isPreviewLoading"
@@ -375,7 +462,24 @@
     />
 
     <!-- FS 媒体查看器（Lightbox Shell） -->
-    <FsMediaLightboxDialog v-if="hasEverOpenedLightbox" />
+      <FsMediaLightboxDialog v-if="hasEverOpenedLightbox" />
+
+    <FilePropertiesDrawer
+      :is-open="isPropertiesDrawerOpen"
+      :item="propertiesTarget"
+      :dark-mode="darkMode"
+      :can-write="!isVirtualDirectory"
+      @close="handleClosePropertiesDrawer"
+      @download="handleDownload"
+      @get-link="handleGetLink"
+      @copy-path="handleCopyPath"
+      @copy-name="handleCopyName"
+      @zip-download="handlePropertiesZipDownload"
+      @copy="handlePropertiesCopy"
+      @move="handlePropertiesMove"
+      @rename="handlePropertiesRename"
+      @delete="handlePropertiesDelete"
+    />
 
     <!-- 悬浮操作栏 (当有选中项时显示) -->
     <FloatingActionBar
@@ -385,6 +489,7 @@
       @download="handleBatchDownload"
       @copy-link="handleBatchGetLink"
       @copy="handleBatchCopy"
+      @move="handleBatchMove"
       @add-to-basket="handleBatchAddToBasket"
       @rename="handleBatchRename"
       @delete="batchDelete"
@@ -399,6 +504,7 @@
       :show-checkboxes="explorerSettings.showCheckboxes"
       @refresh="handleRefresh"
       @new-folder="handleCreateFolder"
+      @new-text-file="handleCreateTextFile"
       @upload="handleOpenUploadModal"
       @toggle-checkboxes="explorerSettings.toggleShowCheckboxes"
       @open-basket="handleOpenFileBasket"
@@ -417,7 +523,7 @@ import { useI18n } from "vue-i18n";
 import { storeToRefs } from "pinia";
 import { useEventListener, useWindowScroll } from "@vueuse/core";
 import { useThemeMode } from "@/composables/core/useThemeMode.js";
-import { IconBack, IconExclamation, IconSearch, IconSettings, IconXCircle } from "@/components/icons";
+import { IconBack, IconExclamation, IconRefresh, IconSearch, IconSettings, IconXCircle } from "@/components/icons";
 import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
 
 // 组合式函数 - 使用统一聚合导出
@@ -437,6 +543,7 @@ import BreadcrumbNav from "@/modules/fs/components/shared/BreadcrumbNav.vue";
 import DirectoryList from "@/modules/fs/components/directory/DirectoryList.vue";
 import DirectoryReadme from "@/modules/fs/components/DirectoryReadme.vue";
 import FileOperations from "@/modules/fs/components/shared/FileOperations.vue";
+import FilePropertiesDrawer from "@/modules/fs/components/shared/FilePropertiesDrawer.vue";
 // （Uppy、Office、EPUB、视频播放器等）按需加载
 const FilePreview = defineAsyncComponent(() => import("@/modules/fs/components/preview/FilePreview.vue"));
 const UppyUploadModal = defineAsyncComponent(() => import("@/modules/fs/components/shared/modals/UppyUploadModal.vue"));
@@ -455,6 +562,9 @@ import BackToTop from "@/modules/fs/components/shared/BackToTop.vue";
 import { useExplorerSettings } from "@/composables/useExplorerSettings";
 import { createFsItemNameDialogValidator, isSameOrSubPath, validateFsItemName } from "@/utils/fsPathUtils.js";
 import { useFsMediaLightbox } from "@/modules/fs/composables/useFsMediaLightbox";
+import { useFsService } from "@/modules/fs/fsService.js";
+import { copyToClipboard } from "@/utils/clipboard.js";
+import { TaskStatus, TaskType, useTaskManager } from "@/utils/taskManager.js";
 import { createLogger } from "@/utils/logger.js";
 
 const { t } = useI18n();
@@ -468,9 +578,13 @@ const fileOperations = useFileOperations();
 const uiState = useUIState();
 const fileBasket = useFileBasket();
 const pathPassword = usePathPassword();
+const fsService = useFsService();
+const taskManager = useTaskManager();
 
 // 右键菜单 - 延迟初始化
 let contextMenu = null;
+let processingTaskPollTimer = null;
+const backendProcessingPathSet = ref(new Set());
 
 // Lightbox（模块内单例）
 const fsLightbox = useFsMediaLightbox();
@@ -490,6 +604,7 @@ const {
   directoryMeta,
   directoryHasMore,
   directoryLoadingMore,
+  directoryRefreshing,
   isAdmin,
   hasApiKey,
   hasFilePermission,
@@ -508,6 +623,7 @@ const {
   navigateToFile,
   stopPreview,
   refreshDirectory,
+  refreshDirectoryInBackground,
   refreshCurrentRoute,
   prefetchDirectory,
   consumePendingScrollRestore,
@@ -521,6 +637,7 @@ const { y: windowScrollY } = useWindowScroll();
 // ===== 仅“第一次打开”时才加载重弹窗组件 =====
 const hasEverOpenedUploadModal = ref(false);
 const hasEverOpenedCopyModal = ref(false);
+const hasEverOpenedMoveModal = ref(false);
 const hasEverOpenedTasksModal = ref(false);
 const hasEverOpenedSearchModal = ref(false);
 const hasEverOpenedSettingsDrawer = ref(false);
@@ -585,6 +702,45 @@ const visibleItems = computed(() => {
   return items.filter((item) => !regexes.some((re) => re.test(item.name)));
 });
 
+const normalizeProcessingPath = (path) => String(path || "").replace(/\/+$/, "");
+
+const isProcessingPathMatch = (path, processingPath) => {
+  const normalizedPath = normalizeProcessingPath(path);
+  const normalizedProcessingPath = normalizeProcessingPath(processingPath);
+  if (!normalizedPath || !normalizedProcessingPath) return false;
+  if (normalizedPath === normalizedProcessingPath) return true;
+  return normalizedPath.startsWith(`${normalizedProcessingPath}/`);
+};
+
+const processingPathSet = computed(() => {
+  const activeStatuses = new Set([TaskStatus.PENDING, TaskStatus.RUNNING]);
+  const writeTaskTypes = new Set([TaskType.COPY, TaskType.MOVE, TaskType.DELETE]);
+  const paths = new Set(backendProcessingPathSet.value);
+
+  for (const task of taskManager.state.tasks || []) {
+    if (!activeStatuses.has(task?.status) || !writeTaskTypes.has(task?.type)) continue;
+
+    const affectedPaths = Array.isArray(task?.details?.affectedPaths) ? task.details.affectedPaths : [];
+    for (const path of affectedPaths) {
+      const normalized = normalizeProcessingPath(path);
+      if (normalized) paths.add(normalized);
+    }
+  }
+
+  return paths;
+});
+
+const isItemProcessing = (item) => {
+  const path = normalizeProcessingPath(item?.path);
+  return Boolean(path && Array.from(processingPathSet.value).some((processingPath) => isProcessingPathMatch(path, processingPath)));
+};
+
+const hasProcessingSelection = () => getSelectedItems().some((item) => isItemProcessing(item));
+
+const warnProcessingOperation = () => {
+  showMessage("warning", t("mount.messages.itemProcessingLocked"));
+};
+
 const { selectedItems, selectedCount, setAvailableItems, toggleSelectAll, getSelectedItems, selectItem, clearSelection } = selection;
 
 // 组合式函数状态和方法
@@ -610,25 +766,34 @@ const {
 const showDeleteDialog = ref(false);
 const itemsToDelete = ref([]);
 const isDeleting = ref(false);
+const showUnsavedPreviewDialog = ref(false);
+const isSavingPreviewBeforeClose = ref(false);
 
 // 右键菜单相关状态
 const contextMenuRenameItem = ref(null);
 const contextMenuRenameDialogOpen = ref(false);
 const isRenaming = ref(false); // 重命名操作的 loading 状态
 const contextMenuCopyItems = ref([]);
+const contextMenuMoveItems = ref([]);
 // 右键菜单高亮的项目路径（临时高亮，不是勾选选中）
 const contextHighlightPath = ref(null);
 // DirectoryList 组件引用
 const directoryListRef = ref(null);
+const filePreviewRef = ref(null);
 // DirectoryList 重命名操作的 loading 状态
 const isDirectoryListRenaming = ref(false);
 
 // 新建文件夹弹窗状态
 const showCreateFolderDialog = ref(false);
 const isCreatingFolder = ref(false);
+const showCreateTextFileDialog = ref(false);
+const isCreatingTextFile = ref(false);
 
 // 设置抽屉状态
 const isSettingsDrawerOpen = ref(false);
+const isMoveModalOpen = ref(false);
+const isPropertiesDrawerOpen = ref(false);
+const propertiesTarget = ref(null);
 
 // ===== 仅“第一次打开”时才加载重弹窗组件（watch 需要在依赖变量定义之后注册） =====
 watch(
@@ -641,6 +806,12 @@ watch(
   () => isCopyModalOpen.value,
   (open) => {
     if (open) hasEverOpenedCopyModal.value = true;
+  }
+);
+watch(
+  () => isMoveModalOpen.value,
+  (open) => {
+    if (open) hasEverOpenedMoveModal.value = true;
   }
 );
 watch(
@@ -683,35 +854,39 @@ const copyModalItems = computed(() => {
   return getSelectedItems();
 });
 
+// 移动弹窗使用的项目列表：预留右键入口，当前多选工具栏使用勾选项目
+const moveModalItems = computed(() => {
+  if (contextMenuMoveItems.value.length > 0) {
+    return contextMenuMoveItems.value;
+  }
+  return getSelectedItems();
+});
+
 // 初始化右键菜单
 const initContextMenu = () => {
   contextMenu = useContextMenu({
-    onDownload: handleDownload,
-    onGetLink: handleGetLink,
-    onRename: (item) => {
-      // 直接触发重命名，设置待重命名的项目
-      contextMenuRenameItem.value = item;
-      contextMenuRenameDialogOpen.value = true;
-    },
-    onDelete: (items) => {
-      if (Array.isArray(items)) {
-        itemsToDelete.value = items;
-      } else {
-        itemsToDelete.value = [items];
-      }
-      showDeleteDialog.value = true;
-    },
-    onCopy: (items) => {
-      // 右键菜单复制：直接使用传入的项目，而不是依赖 selectedItems
-      const itemsArray = Array.isArray(items) ? items : [items];
-      if (itemsArray.length === 0) {
-        showMessage("warning", t("mount.messages.noItemsSelected"));
+    onOpen: (item) => {
+      if (!item) return;
+      if (isItemProcessing(item)) {
+        warnProcessingOperation();
         return;
       }
-      // 临时设置选中项目以便复制弹窗使用
-      contextMenuCopyItems.value = itemsArray;
-      openCopyModal();
+      if (item.isDirectory) {
+        handleNavigate(item.path);
+      } else {
+        handlePreview(item);
+      }
     },
+    onDownload: handleDownload,
+    onGetLink: handleGetLink,
+    onRename: handleContextRename,
+    onDelete: handleContextDelete,
+    onCopy: handleContextCopy,
+    onMove: handleContextMove,
+    onProperties: handleOpenProperties,
+    onCopyPath: handleCopyPath,
+    onCopyName: handleCopyName,
+    onZipDownload: handleZipDownload,
     onAddToBasket: (items) => {
       const itemsArray = Array.isArray(items) ? items : [items];
       const result = fileBasket.addSelectedToBasket(itemsArray, currentPath.value);
@@ -725,14 +900,118 @@ const initContextMenu = () => {
       // 切换勾选框显示状态
       explorerSettings.toggleShowCheckboxes();
     },
+    onRefresh: handleRefresh,
+    canWrite: () => !isVirtualDirectory.value,
     t,
   });
+};
+
+const isBackendJobComplete = (status) => ["completed", "success", "partial"].includes(String(status || "").toLowerCase());
+const isBackendJobFailed = (status) => ["failed", "cancelled", "canceled"].includes(String(status || "").toLowerCase());
+const isBackendJobActive = (status) => ["pending", "running"].includes(String(status || "").toLowerCase());
+const isWriteJobType = (taskType) => ["copy", "move", "delete"].includes(String(taskType || "").toLowerCase());
+
+const addNormalizedProcessingPath = (paths, path) => {
+  const normalized = normalizeProcessingPath(path);
+  if (normalized) paths.add(normalized);
+};
+
+const getParentDirectoryPath = (path) => {
+  const normalized = normalizeProcessingPath(path);
+  if (!normalized || normalized === "/") return "/";
+  const slashIndex = normalized.lastIndexOf("/");
+  if (slashIndex <= 0) return "/";
+  return normalized.slice(0, slashIndex);
+};
+
+const collectProcessingPathsFromJob = (job) => {
+  const paths = new Set();
+  const payload = job?.payload || {};
+  const stats = job?.stats || {};
+
+  if (Array.isArray(payload.paths)) {
+    for (const path of payload.paths) {
+      addNormalizedProcessingPath(paths, path);
+    }
+  }
+
+  if (Array.isArray(payload.items)) {
+    for (const item of payload.items) {
+      addNormalizedProcessingPath(paths, item?.sourcePath);
+      addNormalizedProcessingPath(paths, item?.targetPath);
+      addNormalizedProcessingPath(paths, getParentDirectoryPath(item?.targetPath));
+    }
+  }
+
+  if (Array.isArray(stats.itemResults)) {
+    for (const item of stats.itemResults) {
+      addNormalizedProcessingPath(paths, item?.sourcePath);
+      addNormalizedProcessingPath(paths, item?.targetPath);
+      addNormalizedProcessingPath(paths, getParentDirectoryPath(item?.targetPath));
+    }
+  }
+
+  return paths;
+};
+
+const syncBackendProcessingLocks = async () => {
+  try {
+    const response = await fsService.listJobs({ limit: 100 });
+    const payload = response?.data || response || {};
+    const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+    const paths = new Set();
+
+    for (const job of jobs) {
+      if (!isBackendJobActive(job?.status) || !isWriteJobType(job?.taskType)) continue;
+      for (const path of collectProcessingPathsFromJob(job)) {
+        paths.add(path);
+      }
+    }
+
+    backendProcessingPathSet.value = paths;
+  } catch (error) {
+    log.warn("[MountExplorer] 同步后端批量任务锁失败:", error);
+  }
+};
+
+const pollProcessingTaskLocks = async () => {
+  const activeStatuses = new Set([TaskStatus.PENDING, TaskStatus.RUNNING]);
+  const localTasks = (taskManager.state.tasks || []).filter((task) => activeStatuses.has(task?.status) && task?.details?.jobId);
+  await syncBackendProcessingLocks();
+  if (localTasks.length === 0) return;
+
+  let hasCompleted = false;
+  for (const task of localTasks) {
+    try {
+      const response = await fsService.getJobStatus(task.details.jobId);
+      const job = response?.data || response;
+      const status = job?.status;
+      if (isBackendJobComplete(status)) {
+        taskManager.completeTask(task.id, { status, affectedPaths: [] });
+        hasCompleted = true;
+      } else if (isBackendJobFailed(status)) {
+        taskManager.failTask(task.id, job?.errorMessage || status, { status, affectedPaths: [] });
+        hasCompleted = true;
+      }
+    } catch (error) {
+      log.warn("[MountExplorer] 轮询批量任务锁状态失败:", error);
+    }
+  }
+
+  if (hasCompleted) {
+    invalidateCaches();
+    await refreshDirectory();
+  }
 };
 
 onMounted(() => {
   explorerSettings.loadSettings();
   explorerSettings.setupDarkModeObserver();
   initContextMenu();
+  void syncBackendProcessingLocks();
+  processingTaskPollTimer = window.setInterval(() => {
+    void pollProcessingTaskLocks();
+  }, 5000);
 });
 
 const props = defineProps({
@@ -776,6 +1055,201 @@ const handleOpenFileBasket = () => {
   fileBasket.toggleBasket();
 };
 
+const toItemArray = (items) => (Array.isArray(items) ? items.filter(Boolean) : items ? [items] : []);
+
+const getItemParentPath = (item) => {
+  const rawPath = String(item?.path || "");
+  if (!rawPath || rawPath === "/") return "/";
+  const normalized = item?.isDirectory ? rawPath.replace(/\/+$/, "") : rawPath;
+  const index = normalized.lastIndexOf("/");
+  if (index <= 0) return "/";
+  return `${normalized.slice(0, index)}/`.replace(/\/{2,}/g, "/");
+};
+
+const handleContextRename = (item) => {
+  if (!item) return;
+  if (isItemProcessing(item)) {
+    warnProcessingOperation();
+    return;
+  }
+  contextMenuRenameItem.value = item;
+  contextMenuRenameDialogOpen.value = true;
+};
+
+const handleContextDelete = (items) => {
+  const itemsArray = toItemArray(items);
+  if (itemsArray.length === 0) return;
+  if (itemsArray.some((item) => isItemProcessing(item))) {
+    warnProcessingOperation();
+    return;
+  }
+  itemsToDelete.value = itemsArray;
+  showDeleteDialog.value = true;
+};
+
+const handleContextCopy = (items) => {
+  const itemsArray = toItemArray(items);
+  if (itemsArray.length === 0) {
+    showMessage("warning", t("mount.messages.noItemsSelected"));
+    return;
+  }
+  contextMenuCopyItems.value = itemsArray;
+  openCopyModal();
+};
+
+const handleContextMove = (items) => {
+  const itemsArray = toItemArray(items);
+  if (itemsArray.length === 0) {
+    showMessage("warning", t("mount.messages.noItemsSelected"));
+    return;
+  }
+  if (itemsArray.some((item) => isItemProcessing(item))) {
+    warnProcessingOperation();
+    return;
+  }
+  contextMenuMoveItems.value = itemsArray;
+  isMoveModalOpen.value = true;
+};
+
+const handleOpenProperties = (items) => {
+  const itemsArray = toItemArray(items);
+  propertiesTarget.value = itemsArray.length > 1 ? itemsArray : itemsArray[0] || null;
+  isPropertiesDrawerOpen.value = !!propertiesTarget.value;
+};
+
+const handleClosePropertiesDrawer = () => {
+  isPropertiesDrawerOpen.value = false;
+  propertiesTarget.value = null;
+};
+
+const handleCopyPath = async (items) => {
+  const itemsArray = toItemArray(items);
+  const text = itemsArray.map((item) => item.path).filter(Boolean).join("\n");
+  const ok = await copyToClipboard(text);
+  showMessage(ok ? "success" : "error", ok ? t("mount.messages.pathCopiedSuccess") : t("mount.messages.copyFailed", { message: t("common.unknown") }));
+};
+
+const handleCopyName = async (items) => {
+  const itemsArray = toItemArray(items);
+  const text = itemsArray.map((item) => item.name).filter(Boolean).join("\n");
+  const ok = await copyToClipboard(text);
+  showMessage(ok ? "success" : "error", ok ? t("mount.messages.nameCopiedSuccess") : t("mount.messages.copyFailed", { message: t("common.unknown") }));
+};
+
+const collectFilesForZip = async (items) => {
+  const output = [];
+  const visitedDirs = new Set();
+
+  const addFile = (file, sourceDirectory = null) => {
+    if (!file || file.isDirectory || !file.path || !file.name) return;
+    output.push({
+      ...file,
+      sourceDirectory: sourceDirectory || getItemParentPath(file),
+    });
+  };
+
+  const walkDirectory = async (dir) => {
+    const dirPath = String(dir?.path || "");
+    if (!dirPath || visitedDirs.has(dirPath)) return;
+    visitedDirs.add(dirPath);
+
+    let cursor = null;
+    do {
+      const data = await fsService.getDirectoryList(dirPath, { cursor });
+      const children = Array.isArray(data?.items) ? data.items : [];
+
+      for (const child of children) {
+        if (child?.isDirectory) {
+          await walkDirectory(child);
+        } else {
+          addFile(child, getItemParentPath(child));
+        }
+      }
+
+      cursor = typeof data?.nextCursor === "string" && data.nextCursor ? data.nextCursor : null;
+    } while (cursor);
+  };
+
+  for (const item of toItemArray(items)) {
+    if (item?.isDirectory) {
+      await walkDirectory(item);
+    } else {
+      addFile(item);
+    }
+  }
+
+  const unique = new Map();
+  for (const file of output) {
+    if (!unique.has(file.path)) {
+      unique.set(file.path, file);
+    }
+  }
+  return Array.from(unique.values());
+};
+
+const handleZipDownload = async (items) => {
+  const itemsArray = toItemArray(items);
+  if (itemsArray.length === 0) {
+    showMessage("warning", t("mount.messages.noItemsSelected"));
+    return;
+  }
+
+  try {
+    showMessage("info", t("mount.messages.zipPreparing"));
+    const files = await collectFilesForZip(itemsArray);
+    if (files.length === 0) {
+      showMessage("warning", t("mount.messages.noFilesForZip"));
+      return;
+    }
+
+    const result = await fileBasket.createPackTaskForFiles(files, {
+      taskName: t("mount.contextMenu.zipTaskName", { count: files.length }),
+      emptyMessage: t("mount.messages.noFilesForZip"),
+    });
+
+    if (result.success) {
+      showMessage("success", result.message);
+      openTasksModal();
+    } else {
+      showMessage("warning", result.message);
+    }
+  } catch (error) {
+    log.error("创建 ZIP 下载任务失败:", error);
+    showMessage("error", t("mount.messages.zipCreateFailed", { message: error?.message || t("common.unknown") }));
+  }
+};
+
+const closePropertiesAfterAction = () => {
+  if (isPropertiesDrawerOpen.value) {
+    handleClosePropertiesDrawer();
+  }
+};
+
+const handlePropertiesZipDownload = async (items) => {
+  await handleZipDownload(items);
+  closePropertiesAfterAction();
+};
+
+const handlePropertiesCopy = (items) => {
+  handleContextCopy(items);
+  closePropertiesAfterAction();
+};
+
+const handlePropertiesMove = (items) => {
+  handleContextMove(items);
+  closePropertiesAfterAction();
+};
+
+const handlePropertiesRename = (item) => {
+  handleContextRename(item);
+  closePropertiesAfterAction();
+};
+
+const handlePropertiesDelete = (items) => {
+  handleContextDelete(items);
+  closePropertiesAfterAction();
+};
+
 // 悬浮操作栏事件处理
 const handleBatchDownload = async () => {
   const selectedFiles = getSelectedItems();
@@ -796,6 +1270,10 @@ const handleBatchGetLink = async () => {
 const handleBatchRename = () => {
   const selectedFiles = getSelectedItems();
   if (selectedFiles.length === 1) {
+    if (isItemProcessing(selectedFiles[0])) {
+      warnProcessingOperation();
+      return;
+    }
     // 直接打开重命名对话框
     contextMenuRenameItem.value = selectedFiles[0];
     contextMenuRenameDialogOpen.value = true;
@@ -850,8 +1328,30 @@ const handlePrefetch = (path) => {
 /**
  * 处理刷新
  */
+const REFRESH_SLOW_HINT_MS = 6000;
+
 const handleRefresh = async () => {
-  await refreshDirectory();
+  if (directoryRefreshing.value) return;
+
+  let slowHintTimer = null;
+  try {
+    slowHintTimer = window.setTimeout(() => {
+      if (directoryRefreshing.value) {
+        showMessage("info", t("mount.messages.refreshStillRunning"));
+      }
+    }, REFRESH_SLOW_HINT_MS);
+
+    const refreshed = await refreshDirectoryInBackground();
+    if (refreshed) {
+      showMessage("success", t("mount.messages.refreshSuccess"));
+    }
+  } catch (error) {
+    showMessage("error", error?.message || t("mount.messages.refreshFailed"));
+  } finally {
+    if (slowHintTimer) {
+      window.clearTimeout(slowHintTimer);
+    }
+  }
 };
 
 /**
@@ -874,6 +1374,13 @@ const handleViewModeChange = (newViewMode) => {
  */
 const handleCreateFolder = () => {
   showCreateFolderDialog.value = true;
+};
+
+/**
+ * 处理创建文本文件 - 打开弹窗
+ */
+const handleCreateTextFile = () => {
+  showCreateTextFileDialog.value = true;
 };
 
 /**
@@ -912,6 +1419,49 @@ const handleCreateFolderCancel = () => {
 };
 
 /**
+ * 处理新建文本确认
+ */
+const handleCreateTextFileConfirm = async (fileName) => {
+  if (!fileName) return;
+
+  const nameValidation = validateFsItemName(fileName);
+  if (!nameValidation.valid) return;
+
+  const normalizedName = fileName.trim();
+  const exists = visibleItems.value.some((item) => item?.name === normalizedName);
+  if (exists) {
+    showMessage("error", t("mount.messages.itemAlreadyExists", { name: normalizedName }));
+    return;
+  }
+
+  isCreatingTextFile.value = true;
+  try {
+    const result = await fileOperations.createTextFile(currentPath.value, normalizedName, "");
+
+    if (result.success) {
+      showMessage("success", result.message);
+      invalidateCaches();
+      await refreshDirectory();
+      showCreateTextFileDialog.value = false;
+    } else {
+      showMessage("error", result.message);
+    }
+  } catch (error) {
+    log.error("创建文本文件失败:", error);
+    showMessage("error", error.message || t("mount.messages.createTextFileFailed"));
+  } finally {
+    isCreatingTextFile.value = false;
+  }
+};
+
+/**
+ * 处理新建文本取消
+ */
+const handleCreateTextFileCancel = () => {
+  showCreateTextFileDialog.value = false;
+};
+
+/**
  * 处理右键菜单重命名确认
  */
 const handleContextMenuRenameConfirm = async (newName) => {
@@ -936,7 +1486,27 @@ const handleContextMenuRenameConfirm = async (newName) => {
       newPath += "/";
     }
 
-    // 使用 fileOperations 重命名
+    if (isDirectory) {
+      const response = await fsService.batchMoveItems([{ sourcePath: oldPath, targetPath: newPath }], {});
+      const data = response?.data || response;
+      showMessage(
+        "success",
+        response?.message ||
+          t("mount.taskManager.moveStarted", {
+            count: 1,
+            path: newPath,
+          }),
+      );
+      if (data?.jobId) {
+        openTasksModal();
+      }
+      invalidateCaches();
+      contextMenuRenameDialogOpen.value = false;
+      contextMenuRenameItem.value = null;
+      return;
+    }
+
+    // 文件重命名仍使用轻量同步接口；文件夹重命名走后台任务，避免大目录触发 Worker invocation 限制。
     const result = await fileOperations.renameItem(oldPath, newPath);
 
     if (result.success) {
@@ -1008,6 +1578,10 @@ const handleGetLink = async (item) => {
  */
 const handlePreview = async (item) => {
   if (!item || item.isDirectory) return;
+  if (isItemProcessing(item)) {
+    warnProcessingOperation();
+    return;
+  }
 
   // 直接导航到文件路径（pathname 表示对象）
   await navigateToFile(item.path);
@@ -1017,6 +1591,10 @@ const handlePreview = async (item) => {
  * 处理文件删除（显示确认对话框）
  */
 const handleDelete = (item) => {
+  if (isItemProcessing(item)) {
+    warnProcessingOperation();
+    return;
+  }
   itemsToDelete.value = [item];
   showDeleteDialog.value = true;
 };
@@ -1026,6 +1604,10 @@ const handleDelete = (item) => {
  */
 const handleRename = async ({ item, newName }) => {
   if (!item || !newName || !newName.trim()) return;
+  if (isItemProcessing(item)) {
+    warnProcessingOperation();
+    return;
+  }
 
   const nameValidation = validateFsItemName(newName);
   if (!nameValidation.valid) return;
@@ -1085,6 +1667,10 @@ const batchDelete = () => {
     showMessage("warning", t("mount.messages.noItemsSelected"));
     return;
   }
+  if (selectedFiles.some((item) => isItemProcessing(item))) {
+    warnProcessingOperation();
+    return;
+  }
 
   itemsToDelete.value = selectedFiles;
   showDeleteDialog.value = true;
@@ -1115,6 +1701,15 @@ const confirmDelete = async () => {
 
     if (result.success) {
       if (result.jobId) {
+        const affectedPaths = itemsToDelete.value.map((item) => item?.path).filter(Boolean);
+        const taskId = taskManager.addTask(TaskType.DELETE, t("mount.taskManager.deleteTask"), affectedPaths.length || 1);
+        taskManager.updateTaskProgress(taskId, 0, {
+          jobId: result.jobId,
+          total: affectedPaths.length,
+          processed: 0,
+          affectedPaths,
+        });
+
         showMessage("success", result.message || "删除作业已创建");
         if (itemsToDelete.value.length > 1) {
           clearSelection();
@@ -1226,6 +1821,34 @@ const handleCopyStarted = (event) => {
   const message =
     event?.message ||
     t("mount.taskManager.copyStarted", {
+      count: event?.itemCount || 0,
+      path: event?.targetPath || "",
+    });
+  showMessage("success", message);
+  clearSelection();
+};
+
+const handleBatchMove = () => {
+  if (selectedItems.value.length === 0) {
+    showMessage("warning", t("mount.messages.noItemsSelected"));
+    return;
+  }
+  if (hasProcessingSelection()) {
+    warnProcessingOperation();
+    return;
+  }
+  isMoveModalOpen.value = true;
+};
+
+const handleCloseMoveModal = () => {
+  isMoveModalOpen.value = false;
+  contextMenuMoveItems.value = [];
+};
+
+const handleMoveStarted = (event) => {
+  const message =
+    event?.message ||
+    t("mount.taskManager.moveStarted", {
       count: event?.itemCount || 0,
       path: event?.targetPath || "",
     });
@@ -1433,7 +2056,40 @@ const handlePreviewError = (error) => {
 };
 
 const closePreviewWithUrl = async () => {
+  if (filePreviewRef.value?.hasUnsavedChanges?.()) {
+    showUnsavedPreviewDialog.value = true;
+    return;
+  }
+
   await navigateToPreserveHistory(currentPath.value);
+};
+
+const closePreviewWithoutUnsavedCheck = async () => {
+  showUnsavedPreviewDialog.value = false;
+  await navigateToPreserveHistory(currentPath.value);
+};
+
+const handleCancelClosePreview = () => {
+  if (isSavingPreviewBeforeClose.value) return;
+  showUnsavedPreviewDialog.value = false;
+};
+
+const handleDiscardAndClosePreview = async () => {
+  if (isSavingPreviewBeforeClose.value) return;
+  await closePreviewWithoutUnsavedCheck();
+};
+
+const handleSaveAndClosePreview = async () => {
+  if (isSavingPreviewBeforeClose.value) return;
+  isSavingPreviewBeforeClose.value = true;
+  try {
+    const saved = await filePreviewRef.value?.saveCurrentFile?.();
+    if (saved) {
+      await closePreviewWithoutUnsavedCheck();
+    }
+  } finally {
+    isSavingPreviewBeforeClose.value = false;
+  }
 };
 
 const handleRetryDirectory = async () => {
@@ -1511,6 +2167,10 @@ onBeforeUnmount(() => {
 
   // 清理 MutationObserver
   explorerSettings.cleanupDarkModeObserver();
+  if (processingTaskPollTimer) {
+    window.clearInterval(processingTaskPollTimer);
+    processingTaskPollTimer = null;
+  }
 
   // 停止预览
   stopPreview();

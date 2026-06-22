@@ -323,6 +323,41 @@ export function useFileBasket() {
         };
       }
 
+      const files = fileBasketStore.getCollectedFiles();
+
+      return await createPackTaskForFiles(files, {
+        taskName: t("fileBasket.task.name", {
+          count: collectionCount.value,
+          directories: directoryCount.value,
+        }),
+        emptyMessage: t("fileBasket.messages.emptyBasket"),
+        clearBasketOnComplete: true,
+      });
+    } catch (error) {
+      log.error("创建打包任务失败:", error);
+      return {
+        success: false,
+        message: t("fileBasket.messages.taskCreateFailed"),
+      };
+    }
+  };
+
+  /**
+   * 创建指定文件列表的打包下载任务，不依赖也不清空文件篮。
+   * @param {Array} files
+   * @param {{ taskName?: string, emptyMessage?: string, clearBasketOnComplete?: boolean }} [options]
+   * @returns {Promise<Object>}
+   */
+  const createPackTaskForFiles = async (files, options = {}) => {
+    try {
+      const fileList = Array.isArray(files) ? files.filter((file) => file && !file.isDirectory && file.path && file.name) : [];
+      if (!fileList.length) {
+        return {
+          success: false,
+          message: options.emptyMessage || t("fileBasket.messages.emptyBasket"),
+        };
+      }
+
       // 先生成文件名（保持与旧逻辑一致），用于：
       // - File System Access API 的 suggestedName
       // - Blob 模式下 saveAs 的下载文件名
@@ -353,19 +388,24 @@ export function useFileBasket() {
 
       // 创建任务
       const taskName = t("fileBasket.task.name", {
-        count: collectionCount.value,
-        directories: directoryCount.value,
+        count: fileList.length,
+        directories: new Set(fileList.map((file) => file.sourceDirectory || "/")).size,
       });
 
-      const taskId = taskManager.addTask("download", taskName, collectionCount.value);
+      const taskId = taskManager.addTask("download", options.taskName || taskName, fileList.length);
 
       // 启动异步打包处理
-      processPackTask(taskId, { outputTarget, zipFileName });
+      processPackTask(taskId, {
+        outputTarget,
+        zipFileName,
+        files: fileList,
+        clearBasketOnComplete: options.clearBasketOnComplete === true,
+      });
 
       return {
         success: true,
         taskId,
-        message: t("fileBasket.messages.taskCreated", { taskName }),
+        message: t("fileBasket.messages.taskCreated", { taskName: options.taskName || taskName }),
       };
     } catch (error) {
       log.error("创建打包任务失败:", error);
@@ -410,8 +450,8 @@ export function useFileBasket() {
         startTime: new Date().toISOString(),
       });
 
-      // 获取收集的文件
-      const files = fileBasketStore.getCollectedFiles();
+      // 获取待打包文件
+      const files = Array.isArray(options.files) ? options.files : fileBasketStore.getCollectedFiles();
 
       // 动态导入 zip.js（file-saver 仅在 Blob 模式需要）
       const { ZipWriter, BlobWriter, BlobReader, HttpReader, configure } = await import("@zip.js/zip.js");
@@ -598,8 +638,9 @@ export function useFileBasket() {
             : t("fileBasket.task.summarySuccess", { count: successCount }),
       });
 
-      // 打包完成后自动清空文件篮
-      fileBasketStore.clearBasket();
+      if (options.clearBasketOnComplete === true) {
+        fileBasketStore.clearBasket();
+      }
     } catch (error) {
       log.error("打包任务失败:", error);
       taskManager.failTask(
@@ -731,6 +772,7 @@ export function useFileBasket() {
 
     // 打包下载方法
     createPackTask,
+    createPackTaskForFiles,
 
     // 工具方法
     isFileInBasket,

@@ -41,7 +41,7 @@
 
           <!-- Direct Preview -->
           <button
-            @click="handleS3DirectPreview"
+            @click="handleDirectPreview"
             class="group flex items-center justify-center w-8 h-8 rounded-full transition-all bg-transparent text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:text-purple-400 dark:hover:text-purple-300 dark:hover:bg-purple-900/20 transform hover:scale-105"
             :title="t('mount.filePreview.directPreview')"
             :disabled="isGeneratingPreview"
@@ -79,7 +79,7 @@
         @toggle-fullscreen="toggleFullscreen"
       >
         <template #left>
-          <template v-if="isText">
+          <template v-if="isText && !isLargeTextFile">
             <select
               v-model="textPreviewMode"
               class="mode-select px-3 py-1 text-sm border rounded"
@@ -103,7 +103,7 @@
         </template>
 
         <template #right>
-          <template v-if="isText">
+          <template v-if="isText && !isLargeTextFile">
             <div
               v-if="textPreviewMode === 'edit'"
               class="context-menu-hint flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 cursor-help hover:scale-110"
@@ -155,7 +155,7 @@
             <!-- 右侧：控制按钮 -->
             <div class="toolbar-right flex flex-wrap items-center gap-2">
               <!-- 文本类：模式切换 + 编码 -->
-              <template v-if="isText">
+              <template v-if="isText && !isLargeTextFile">
                 <select
                   v-model="textPreviewMode"
                   class="mode-select px-2 py-1 text-sm border rounded"
@@ -191,7 +191,7 @@
 
               <!-- 文本类：保存按钮（仅编辑模式） -->
               <button
-                v-if="isText && textPreviewMode === 'edit'"
+                v-if="isText && !isLargeTextFile && textPreviewMode === 'edit'"
                 @click="handleSaveFile"
                 :disabled="isSaving"
                 class="save-btn flex items-center px-2 py-1 text-sm border rounded transition-colors"
@@ -347,6 +347,17 @@
           />
         </div>
 
+        <!-- 大文本不进入 TextPreview，避免拉取内容造成 Worker invocation 压力 -->
+        <div v-else-if="isLargeTextFile" class="flex-1 flex items-center justify-center">
+          <div class="generic-preview text-center py-12 px-6">
+            <IconExclamationSolid size="5xl" class="mx-auto mb-4" :class="darkMode ? 'text-yellow-400' : 'text-yellow-500'" aria-hidden="true" />
+            <p class="text-lg font-medium mb-2" :class="darkMode ? 'text-yellow-200' : 'text-yellow-700'">{{ t("mount.filePreview.textTooLargeTitle") }}</p>
+            <p class="text-sm max-w-xl mx-auto" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
+              {{ t("mount.filePreview.textTooLargeMessage", { size: formatFileSize(file.size), limit: formatFileSize(MAX_TEXT_INLINE_PREVIEW_BYTES) }) }}
+            </p>
+          </div>
+        </div>
+
         <!-- Markdown预览 - 使用TextRenderer统一处理 -->
         <div v-else-if="isMarkdown" :class="isContentFullscreen ? 'fullscreen-text-container' : ''">
           <TextPreview
@@ -364,6 +375,7 @@
             @error="handleContentError"
             @mode-change="handleModeChange"
             @encoding-change="handleEncodingChange"
+            @save="handleSaveFile"
           />
         </div>
 
@@ -384,6 +396,7 @@
             @error="handleContentError"
             @mode-change="handleModeChange"
             @encoding-change="handleEncodingChange"
+            @save="handleSaveFile"
           />
         </div>
 
@@ -430,7 +443,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { computed, ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { IconCollapse, IconDocument, IconDownload, IconError, IconExclamationSolid, IconEye, IconLink, IconRefresh, IconSave, IconDatabase, IconClock } from "@/components/icons";
 import LoadingIndicator from "@/components/common/LoadingIndicator.vue";
@@ -441,6 +454,7 @@ import { usePathPassword } from "@/composables/usePathPassword.js";
 import { useAuthStore } from "@/stores/authStore.js";
 import { useFsService } from "@/modules/fs/fsService.js";
 import { getPreviewModeFromFilename, PREVIEW_MODES, SUPPORTED_ENCODINGS } from "@/utils/textUtils.js";
+import { DEFAULT_TEXT_EDITABLE_TYPES, isFilenameTextEditable, loadTextEditableTypes } from "@/utils/textEditableTypes.js";
 import AudioPreview from "./AudioPreview.vue";
 import VideoPreview from "./VideoPreview.vue";
 import TextPreview from "./TextPreview.vue";
@@ -557,6 +571,7 @@ const {
 } = renderers;
 
 const resolvedPreview = computed(() => resolvePreviewSelection({ file: props.file }));
+const MAX_TEXT_INLINE_PREVIEW_BYTES = 1024 * 1024;
 
 const previewKey = computed(() => resolvedPreview.value.key);
 const iframeProviders = computed(() => resolvedPreview.value.providers || {});
@@ -573,6 +588,8 @@ const isMarkdown = computed(() => previewKey.value === PREVIEW_KEYS.MARKDOWN);
 const isText = computed(() =>
   [PREVIEW_KEYS.TEXT, PREVIEW_KEYS.CODE, PREVIEW_KEYS.MARKDOWN, PREVIEW_KEYS.HTML].includes(previewKey.value)
 );
+const fileSizeBytes = computed(() => Number(props.file?.size || 0));
+const isLargeTextFile = computed(() => isText.value && fileSizeBytes.value > MAX_TEXT_INLINE_PREVIEW_BYTES);
 
 // 从扩展功能中解构保留的功能
 const {
@@ -589,17 +606,12 @@ const {
   handleAudioError,
 } = extensions;
 
-// 智能初始模式计算属性
-const smartInitialMode = computed(() => {
-  if (!props.file?.name) return "text";
-  return getPreviewModeFromFilename(props.file.name);
-});
-
 // 文本预览状态管理
 const textPreviewMode = ref("text");
 const textEncoding = ref("utf-8");
 const textPreviewRef = ref(null);
 const userHasManuallyChanged = ref(false);
+const textEditableTypes = ref(DEFAULT_TEXT_EDITABLE_TYPES);
 
 // 文本预览标题（根据当前模式动态显示）
 const textPreviewTitle = computed(() => {
@@ -793,8 +805,25 @@ const canEdit = computed(() => {
   return authStore.hasMountUploadPermission && authStore.hasPathPermission(props.file?.path || "");
 });
 
+const isTextEditableFile = computed(() => {
+  if (!isText.value) return false;
+  return isFilenameTextEditable(props.file?.name || props.file?.filename || "", textEditableTypes.value);
+});
+const canOpenTextEditor = computed(() => canEdit.value && isTextEditableFile.value && !isLargeTextFile.value);
+
+// 智能初始模式计算属性
+const smartInitialMode = computed(() => {
+  if (!props.file?.name) return "text";
+  if (canOpenTextEditor.value) return PREVIEW_MODES.EDIT;
+  return getPreviewModeFromFilename(props.file.name);
+});
+
 // 可用的预览模式选项
 const availablePreviewModes = computed(() => {
+  if (isLargeTextFile.value) {
+    return [];
+  }
+
   const modes = [
     { value: PREVIEW_MODES.TEXT, label: "Text" },
     { value: PREVIEW_MODES.CODE, label: "Code" },
@@ -803,7 +832,7 @@ const availablePreviewModes = computed(() => {
   ];
 
   // 根据权限添加编辑模式
-  if (canEdit.value) {
+  if (canOpenTextEditor.value) {
     modes.push({ value: PREVIEW_MODES.EDIT, label: "Edit" });
   }
 
@@ -847,9 +876,31 @@ const dynamicMaxHeight = computed(() => {
   }
 });
 
+const showTextTooLargeMessage = () => {
+  emit("show-message", {
+    type: "warning",
+    message: t("mount.filePreview.textTooLargeEditNotAllowed", { limit: formatFileSize(MAX_TEXT_INLINE_PREVIEW_BYTES) }),
+  });
+};
+
+const handleDirectPreview = () => {
+  if (isLargeTextFile.value) {
+    showTextTooLargeMessage();
+    return;
+  }
+
+  handleS3DirectPreview();
+};
+
 // 保存文件功能
-const handleSaveFile = async () => {
-  if (!textPreviewRef.value || !textPreviewRef.value.getValue) {
+const handleSaveFile = async (payload = null) => {
+  if (isLargeTextFile.value) {
+    showTextTooLargeMessage();
+    return;
+  }
+
+  const hasPayloadContent = typeof payload?.content === "string";
+  if (!hasPayloadContent && (!textPreviewRef.value || !textPreviewRef.value.getValue)) {
     log.error("无法获取编辑器内容");
     emit("show-message", {
       type: "error",
@@ -859,12 +910,14 @@ const handleSaveFile = async () => {
   }
 
   // 获取编辑器最新内容
-  const content = textPreviewRef.value.getValue();
+  const content = hasPayloadContent ? payload.content : textPreviewRef.value.getValue();
 
   // 使用composable保存文件
   const result = await saveFile(props.file.path, props.file.name, content, getCurrentDirectoryPath());
 
   if (result.success) {
+    textPreviewRef.value?.markSaved?.(content);
+
     // 显示成功消息
     emit("show-message", {
       type: "success",
@@ -884,6 +937,8 @@ const handleSaveFile = async () => {
       message: result.message,
     });
   }
+
+  return result;
 };
 
 // Live Photo 检测
@@ -933,11 +988,45 @@ watch(
 
 // 监听模式变化
 watch(textPreviewMode, (newMode) => {
+  if (isLargeTextFile.value) {
+    return;
+  }
+
+  if (newMode === PREVIEW_MODES.EDIT && (!canEdit.value || !isTextEditableFile.value)) {
+    textPreviewMode.value = smartInitialMode.value;
+    emit("show-message", {
+      type: "warning",
+      message: t("mount.filePreview.editNotAllowedForType"),
+    });
+    return;
+  }
+
   // 通过ref调用TextPreview组件的方法
   if (textPreviewRef.value) {
     textPreviewRef.value.switchMode(newMode);
   }
 });
+
+watch(
+  () => [canEdit.value, isTextEditableFile.value, isLargeTextFile.value, props.file?.name],
+  () => {
+    if (isLargeTextFile.value) {
+      if (textPreviewMode.value === PREVIEW_MODES.EDIT) {
+        textPreviewMode.value = "text";
+      }
+      return;
+    }
+
+    if (!userHasManuallyChanged.value && canOpenTextEditor.value) {
+      textPreviewMode.value = PREVIEW_MODES.EDIT;
+      return;
+    }
+
+    if (textPreviewMode.value === PREVIEW_MODES.EDIT && (!canEdit.value || !isTextEditableFile.value)) {
+      textPreviewMode.value = smartInitialMode.value;
+    }
+  }
+);
 
 // 监听编码变化
 watch(textEncoding, (newEncoding) => {
@@ -967,10 +1056,25 @@ watch(
         userHasManuallyChanged.value = false;
         textPreviewMode.value = smartInitialMode.value;
       }
+      if (isLargeTextFile.value) {
+        textPreviewMode.value = PREVIEW_MODES.TEXT;
+      }
     }
   },
   { immediate: true }
 );
+
+onMounted(async () => {
+  textEditableTypes.value = await loadTextEditableTypes();
+});
+
+defineExpose({
+  hasUnsavedChanges: () => Boolean(textPreviewRef.value?.hasUnsavedChanges?.()),
+  saveCurrentFile: async () => {
+    const result = await handleSaveFile();
+    return Boolean(result?.success);
+  },
+});
 
 onBeforeUnmount(() => {
   void exitFullscreen();

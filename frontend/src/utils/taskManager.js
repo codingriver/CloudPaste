@@ -21,6 +21,7 @@ export const TaskStatus = {
 // 任务类型枚举
 export const TaskType = {
   COPY: "copy", // 复制任务
+  MOVE: "move", // 移动任务
   UPLOAD: "upload", // 上传任务
   DELETE: "delete", // 删除任务
   DOWNLOAD: "download", // 下载任务
@@ -197,6 +198,7 @@ const taskManager = {
         },
         byType: {
           [TaskType.COPY]: 0,
+          [TaskType.MOVE]: 0,
           [TaskType.UPLOAD]: 0,
           [TaskType.DELETE]: 0,
           [TaskType.DOWNLOAD]: 0,

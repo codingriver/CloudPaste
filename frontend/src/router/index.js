@@ -46,7 +46,7 @@ const HomeView = createOfflineAwareImport(() => import("../modules/paste/editor/
 const UploadView = createOfflineAwareImport(() => import("../modules/upload/public/UploadView.vue"), "文件上传页面");
 const PasteView = createOfflineAwareImport(() => import("../modules/paste/public/PasteView.vue"), "文本分享页面");
 const FileView = createOfflineAwareImport(() => import("../modules/fileshare/public/FileView.vue"), "文件预览页面");
-const MountExplorerView = createOfflineAwareImport(() => import("../modules/fs/MountExplorerView.vue"), "挂载浏览器");
+const MountExplorerView = createOfflineAwareImport(() => import("../modules/fs/MountExplorerView.vue"), "网盘管理");
 
 // 路由配置 - 完全对应原有的页面逻辑
 const routes = [
@@ -293,7 +293,7 @@ const routes = [
       darkMode: route.meta.darkMode || false,
     }),
     meta: {
-      title: "挂载浏览 - CloudPaste",
+      title: "网盘管理 - CloudPaste",
       originalPage: "mount-explorer",
     },
   },
@@ -305,7 +305,7 @@ const routes = [
       darkMode: route.meta.darkMode || false,
     }),
     meta: {
-      title: "挂载浏览 - CloudPaste",
+      title: "网盘管理 - CloudPaste",
       originalPage: "mount-explorer",
     },
   },
@@ -606,7 +606,7 @@ router.beforeEach(async (to, from, next) => {
       });
     }
 
-    // 挂载浏览器页面权限检查
+    // 网盘管理页面权限检查
     if (to.name === "MountExplorer" || to.name === "MountExplorerPath") {
       // 移除自动重定向逻辑，让组件自己处理权限显示
       // 这样用户可以看到友好的"无权限"提示而不是突然被重定向

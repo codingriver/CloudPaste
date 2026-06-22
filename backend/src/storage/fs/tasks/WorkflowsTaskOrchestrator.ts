@@ -166,7 +166,18 @@ export class WorkflowsTaskOrchestrator implements TaskOrchestratorAdapter {
 
     if (workflowStatus) {
       // 映射 Workflow 实例状态到任务状态
-      const mappedStatus = this.mapWorkflowStatus(workflowStatus.status);
+      const hasContinuationScheduled = (workflowStatus.output as any)?.continuationScheduled === true;
+      let mappedStatus = hasContinuationScheduled
+        ? TaskStatus.RUNNING
+        : this.mapWorkflowStatus(workflowStatus.status);
+      const hasStarted = dbStatus === TaskStatus.RUNNING || !!taskRecord.started_at;
+
+      // Workflow continuation handoff can briefly report queued/waiting while the
+      // task has already started. Keep the public task status stable so progress
+      // does not flicker back to pending during long chunked operations.
+      if (hasStarted && mappedStatus === TaskStatus.PENDING) {
+        mappedStatus = TaskStatus.RUNNING;
+      }
 
       // 如果 Workflow 已经进入终态，而数据库仍然是 pending/running，则进行一次状态同步
       const isDbRunning =

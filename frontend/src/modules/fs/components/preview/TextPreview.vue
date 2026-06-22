@@ -1,8 +1,11 @@
 <template>
   <!-- 直接使用 TextRenderer，减少嵌套 -->
   <div class="text-preview-wrapper">
+    <div v-if="error && !loading" class="error-state" :class="darkMode ? 'text-red-300' : 'text-red-600'">
+      {{ error }}
+    </div>
     <TextRenderer
-      v-if="textContent"
+      v-else-if="!loading"
       :content="textContent"
       :mode="currentMode"
       :language="detectedLanguage"
@@ -91,6 +94,7 @@ const emit = defineEmits(["load", "error", "encoding-change", "save"]);
 // 响应式数据
 const currentMode = ref(props.initialMode);
 const currentEncoding = ref(props.initialEncoding);
+const savedContent = ref("");
 
 // 当前文件数据（响应式）
 const currentFileData = ref(null);
@@ -99,7 +103,6 @@ const currentFileData = ref(null);
 const {
   textContent,
   detectedLanguage,
-  currentEncoding: previewEncoding,
   loading,
   error,
   loadTextContent: loadText,
@@ -114,6 +117,7 @@ const pathPassword = usePathPassword();
 
 // 为了兼容性，保留 fileData 计算属性
 const fileData = computed(() => currentFileData.value);
+const isDirty = computed(() => currentMode.value === "edit" && textContent.value !== savedContent.value);
 
 const handleEncodingChange = async (newEncoding) => {
   currentEncoding.value = newEncoding;
@@ -145,6 +149,7 @@ const loadTextContent = async () => {
   const result = await loadText(currentFileData.value, emit);
   if (result.success) {
     currentEncoding.value = result.result.encoding || "utf-8";
+    savedContent.value = textContent.value;
   }
 };
 
@@ -267,6 +272,10 @@ defineExpose({
   setValue: (content) => {
     textContent.value = content;
   },
+  hasUnsavedChanges: () => isDirty.value,
+  markSaved: (content = textContent.value) => {
+    savedContent.value = content;
+  },
 });
 </script>
 
@@ -288,6 +297,11 @@ defineExpose({
 }
 
 .loading-text {
+  font-size: 0.875rem;
+}
+
+.error-state {
+  padding: 1rem;
   font-size: 0.875rem;
 }
 </style>

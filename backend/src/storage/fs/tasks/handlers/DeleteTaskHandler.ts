@@ -30,6 +30,7 @@ function ensureItemResults(payload: DeleteTaskPayload, stats: TaskStats): ItemRe
     kind: "delete",
     label: path,
     sourcePath: path,
+    isDirectory: current[index]?.isDirectory ?? isDirectoryPathHint(path),
     status: current[index]?.status || "pending",
     error: current[index]?.error,
     message: current[index]?.message,
@@ -303,6 +304,7 @@ export class DeleteTaskHandler implements TaskHandler {
         kind: "delete",
         label: path,
         sourcePath: path,
+        isDirectory: isDirectoryPathHint(path),
         status: "pending" as const,
       })),
     };

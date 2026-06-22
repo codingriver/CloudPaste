@@ -366,6 +366,20 @@ export function useFsService() {
   };
 
   /**
+   * 创建或更新文本文件
+   * @param {string} fullPath
+   * @param {string} content
+   * @returns {Promise<true>}
+   */
+  const updateFile = async (fullPath, content = "") => {
+    const response = await api.fs.updateFile(fullPath, content);
+    if (!response?.success) {
+      throw new Error(response?.message || "文件写入失败");
+    }
+    return true;
+  };
+
+  /**
    * 批量删除
    * @param {string[]} paths
    * @returns {Promise<{ success: boolean; message: string; status: string; raw: any }>}
@@ -518,6 +532,7 @@ export function useFsService() {
     clearDirectoryListCache,
     renameItem,
     createDirectory,
+    updateFile,
     batchDeleteItems,
     batchCopyItems,
     batchMoveItems,

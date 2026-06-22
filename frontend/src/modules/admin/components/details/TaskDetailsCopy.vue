@@ -28,7 +28,7 @@
         </div>
       </div>
       <div>
-        <div class="text-gray-500 dark:text-gray-400">文件进度</div>
+        <div class="text-gray-500 dark:text-gray-400">{{ objectProgress.unknownDirectories > 0 ? '文件进度（已发现）' : '文件进度' }}</div>
         <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
           {{ objectProgress.processed }}/{{ objectProgress.total || objectProgress.processed }}
         </div>
@@ -40,12 +40,16 @@
         </div>
       </div>
       <div>
-        <div class="text-gray-500 dark:text-gray-400">文件 成功/失败/跳过</div>
+        <div class="text-gray-500 dark:text-gray-400">{{ objectProgress.unknownDirectories > 0 ? '文件 成功/失败/跳过（已发现）' : '文件 成功/失败/跳过' }}</div>
         <div class="mt-0.5 font-semibold tabular-nums text-gray-900 dark:text-gray-100">
           {{ objectProgress.success + objectProgress.deduped }}/{{ objectProgress.failed }}/{{ objectProgress.skipped }}
         </div>
       </div>
     </div>
+
+    <p v-if="objectProgress.unknownDirectories > 0" class="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+      仍有 {{ objectProgress.unknownDirectories }} 个目录未统计，文件总数会在目录分片处理时逐步更新。
+    </p>
 
     <div
       v-if="directoryProgress"

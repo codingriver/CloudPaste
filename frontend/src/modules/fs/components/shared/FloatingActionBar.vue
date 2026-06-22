@@ -47,6 +47,15 @@
           <IconCopy size="sm" />
         </ActionButton>
 
+        <!-- 移动按钮 -->
+        <ActionButton
+          :title="t('mount.fileItem.move')"
+          :dark-mode="darkMode"
+          @click="handleMove"
+        >
+          <IconArrowRight size="sm" />
+        </ActionButton>
+
         <!-- 添加到文件篮按钮 - 购物车图标 -->
         <ActionButton
           :title="t('fileBasket.actions.addToBasket')"
@@ -100,6 +109,7 @@ import {
   IconDownload,
   IconLink,
   IconCopy,
+  IconArrowRight,
   IconShoppingCart,
   IconRename,
   IconDelete,
@@ -143,6 +153,7 @@ const emit = defineEmits([
   'download',
   'copy-link',
   'copy',
+  'move',
   'add-to-basket',
   'rename',
   'delete',
@@ -164,6 +175,10 @@ function handleCopyLink() {
 
 function handleCopy() {
   emit('copy')
+}
+
+function handleMove() {
+  emit('move')
 }
 
 function handleAddToBasket() {

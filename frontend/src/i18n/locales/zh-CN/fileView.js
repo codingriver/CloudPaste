@@ -200,7 +200,7 @@ export default {
         notSupported: "您的浏览器不支持视频标签",
         hlsShareNotSupportedTitle: "分享页不支持 m3u8 切片视频",
         hlsShareNotSupportedTip:
-          "这是 m3u8 清单文件，分享页（单文件）无法播放。请回到“挂载浏览”页面配合分片播放",
+          "这是 m3u8 清单文件，分享页（单文件）无法播放。请回到“网盘管理”页面配合分片播放",
       },
 
       // 直链预览提示

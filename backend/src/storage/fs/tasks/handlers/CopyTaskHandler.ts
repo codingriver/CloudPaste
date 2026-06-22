@@ -23,6 +23,7 @@ const PRESCAN_CONCURRENCY_DOCKER = 10;
 // 首次按配置值执行；如果驱动捕捉到 invocation/subrequest 限制，后续续跑会自动减半降档。
 const WORKERS_DIRECTORY_COPY_OBJECT_LIMIT = 10;
 const MAX_WORKERS_DIRECTORY_COPY_OBJECT_LIMIT = 100;
+const MAX_WORKERS_CROSS_MOUNT_DIRECTORY_COPY_OBJECT_LIMIT = 15;
 
 function isDirectoryPathHint(path: string | undefined): boolean {
   return typeof path === "string" && path.endsWith("/");
@@ -33,6 +34,7 @@ function ensureCopyItemResults(payload: CopyTaskPayload, stats: TaskStats): Item
   return payload.items.map((item, index) => ({
     sourcePath: item.sourcePath,
     targetPath: item.targetPath,
+    isDirectory: current[index]?.isDirectory ?? item.isDirectory ?? isDirectoryPathHint(item.sourcePath) ?? isDirectoryPathHint(item.targetPath),
     status: current[index]?.status || "pending",
     fileSize: current[index]?.fileSize || 0,
     bytesTransferred: current[index]?.bytesTransferred || 0,
@@ -68,6 +70,21 @@ function clampDirectoryCopyChunkSize(value: unknown): number {
 
 function getEffectiveDirectoryCopyChunkSize(configuredSize: number, activeDirectory?: Record<string, any> | null): number {
   const configured = Math.max(1, Math.floor(Number(configuredSize) || WORKERS_DIRECTORY_COPY_OBJECT_LIMIT));
+  const limitHits = Math.max(0, Math.floor(Number(activeDirectory?.invocationLimitReachedCount || 0)));
+  let effective = configured;
+
+  for (let i = 0; i < limitHits; i += 1) {
+    effective = Math.max(1, Math.floor(effective / 2));
+  }
+
+  return Math.max(1, effective);
+}
+
+function getEffectiveCrossMountDirectoryCopyChunkSize(configuredSize: number, activeDirectory?: Record<string, any> | null): number {
+  const configured = Math.min(
+    Math.max(1, Math.floor(Number(configuredSize) || WORKERS_DIRECTORY_COPY_OBJECT_LIMIT)),
+    MAX_WORKERS_CROSS_MOUNT_DIRECTORY_COPY_OBJECT_LIMIT,
+  );
   const limitHits = Math.max(0, Math.floor(Number(activeDirectory?.invocationLimitReachedCount || 0)));
   let effective = configured;
 
@@ -160,9 +177,6 @@ async function executeCrossMountDirectoryChunk(params: {
   const { fileSystem, item, job, userId, userType, options } = params;
   const sourceBase = normalizeDirectoryPath(item.sourcePath);
   const targetBase = normalizeDirectoryPath(item.targetPath);
-  // 跨存储单文件复制通常至少包含源读取、目标写入、元数据/索引更新。
-  // 实测多文件同 invocation 容易在后续 Workflow 接力前耗尽子请求预算，因此固定为 1。
-  const maxEntries = 1;
   const active: Record<string, any> = params.activeDirectory?.mode === "cross_mount_directory"
     ? { ...params.activeDirectory }
     : {
@@ -181,6 +195,8 @@ async function executeCrossMountDirectoryChunk(params: {
         invocationLimitReachedCount: 0,
         lastError: null,
       };
+  const maxEntries = getEffectiveCrossMountDirectoryCopyChunkSize(params.configuredChunkSize, active);
+  active.batchSize = maxEntries;
 
   let processedThisRun = 0;
 
@@ -265,7 +281,7 @@ async function executeCrossMountDirectoryChunk(params: {
     try {
       const result = await fileSystem.copyItem(entryPath, targetPath, userId, userType, {
         ...options,
-        maxDirectoryCopyObjects: 1,
+        maxDirectoryCopyObjects: maxEntries,
       });
       if (result?.status === "skipped" || result?.skipped === true) {
         active.skipped += 1;
@@ -1319,6 +1335,7 @@ export class CopyTaskHandler implements TaskHandler {
     const itemResults: ItemResult[] = copyPayload.items.map((item) => ({
       sourcePath: item.sourcePath,
       targetPath: item.targetPath,
+      isDirectory: item.isDirectory ?? isDirectoryPathHint(item.sourcePath) ?? isDirectoryPathHint(item.targetPath),
       status: "pending" as const,
     }));
 

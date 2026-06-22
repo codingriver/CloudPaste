@@ -144,6 +144,9 @@ export default {
     textTypesPlaceholder:
       "txt,htm,html,xml,java,properties,sql,js,md,json,conf,ini,vue,php,py,bat,yml,go,sh,c,cpp,h,hpp,tsx,vtt,srt,ass,rs,lrc,gitignore",
     textTypesHelp: "用逗号分隔的文本文件扩展名，这些文件将使用文本预览器显示",
+    textEditableTypesLabel: "允许在线编辑保存的文本扩展名",
+    textEditableTypesPlaceholder: "txt,md,json,yaml,yml,js,ts,css,html,htm,sh,bat,log,xml,ini,conf,properties,sql,vue,py,go,c,cpp,h,hpp,tsx,rs,gitignore",
+    textEditableTypesHelp: "用逗号分隔。命中的文本文件会显示编辑模式；保存时统一以 UTF-8 写入。",
 
     imageTypes: "图片文件类型",
     imageTypesLabel: "支持的图片文件扩展名",
@@ -257,7 +260,7 @@ export default {
         hint: "关闭后：上传入口不显示，访问 /upload 会自动跳转。",
       },
       mountExplorer: {
-        label: "挂载浏览（/mount-explorer）",
+        label: "网盘管理（/mount-explorer）",
         hint: "关闭后：挂载入口不显示，访问挂载页面会自动跳转。",
       },
     },

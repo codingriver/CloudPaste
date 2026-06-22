@@ -129,7 +129,7 @@ export function useShareUploadController() {
   };
 
   /**
-   * 创建 FS 上传会话（用于挂载浏览器上传弹窗）
+   * 创建 FS 上传会话（用于网盘管理上传弹窗）
    *
    * 这是对 useUploaderClient.createFsUploadSession 的领域包装，
    * 目的是让 UI 不再直接依赖 uploaderClient 与 driver。

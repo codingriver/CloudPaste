@@ -110,6 +110,7 @@
             :show-checkboxes="showCheckboxes"
             :is-selected="isItemSelected(sortedItems[virtualRow.index])"
             :is-context-highlight="isContextHighlight(sortedItems[virtualRow.index])"
+            :is-processing="isProcessingItem(sortedItems[virtualRow.index])"
             :current-path="currentPath"
             :animations-enabled="animationsEnabled"
             :file-name-overflow="fileNameOverflow"
@@ -124,7 +125,7 @@
             }"
             @click="handleItemClick(sortedItems[virtualRow.index])"
             @download="handleDownload"
-            @rename="handleRename"
+            @edit="handleEdit"
             @delete="handleDelete"
             @select="handleItemSelect"
             @getLink="handleGetLink"
@@ -144,13 +145,14 @@
             :show-checkboxes="showCheckboxes"
             :is-selected="isItemSelected(item)"
             :is-context-highlight="isContextHighlight(item)"
+            :is-processing="isProcessingItem(item)"
             :current-path="currentPath"
             :animations-enabled="animationsEnabled"
             :file-name-overflow="fileNameOverflow"
             :show-action-buttons="showActionButtons"
             @click="handleItemClick(item)"
             @download="handleDownload"
-            @rename="handleRename"
+            @edit="handleEdit"
             @delete="handleDelete"
             @select="handleItemSelect"
             @getLink="handleGetLink"
@@ -166,8 +168,9 @@
           v-for="item in sortedItems"
           :key="item.path"
           class="relative flex flex-col items-center p-2 sm:p-3 rounded-lg transition-colors hover:cursor-pointer group"
-          :class="darkMode ? 'hover:bg-gray-700/50' : 'hover:bg-gray-100'"
+          :class="[darkMode ? 'hover:bg-gray-700/50' : 'hover:bg-gray-100', isProcessingItem(item) ? 'opacity-60 cursor-not-allowed' : '']"
           @click="handleItemClick(item)"
+          @contextmenu.prevent="handleContextMenu({ event: $event, item })"
         >
           <!-- 勾选框 (根据全局设置显示) -->
           <div v-if="showCheckboxes" class="absolute top-1 left-1 z-10" @click.stop="toggleItemSelect(item)">
@@ -187,6 +190,9 @@
           <!-- 文件/文件夹名称 -->
           <div class="text-center truncate w-full text-xs sm:text-sm md:text-base" :class="darkMode ? 'text-gray-200' : 'text-gray-700'" :title="item.name">
             {{ item.name }}
+          </div>
+          <div v-if="isProcessingItem(item)" class="mt-1 px-2 py-0.5 rounded-full text-[11px]" :class="darkMode ? 'bg-blue-900/40 text-blue-200' : 'bg-blue-50 text-blue-700'">
+            {{ t("mount.fileItem.processing") }}
           </div>
 
           <!-- 操作按钮 -->
@@ -211,18 +217,24 @@
               <IconLink class="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
             </button>
 
-            <!-- 重命名按钮 - 只对文件显示，文件夹暂时不显示重命名按钮 -->
+            <!-- 编辑按钮（仅支持在线编辑的文件显示） -->
             <button
-              v-if="!item.isDirectory"
-              @click.stop="handleRename(item)"
+              v-if="canEditItem(item) && !isProcessingItem(item)"
+              @click.stop="handleEdit(item)"
               class="p-1 sm:p-1 rounded-full"
               :class="darkMode ? 'hover:bg-gray-600 text-gray-300' : 'hover:bg-gray-200 text-gray-600'"
+              :title="t('mount.fileItem.edit')"
             >
               <IconRename class="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
             </button>
 
             <!-- 删除按钮 -->
-            <button @click.stop="handleDelete(item)" class="p-1 sm:p-1 rounded-full" :class="darkMode ? 'hover:bg-gray-600 text-gray-300' : 'hover:bg-gray-200 text-gray-600'">
+            <button
+              @click.stop="handleDelete(item)"
+              class="p-1 sm:p-1 rounded-full"
+              :class="isProcessingItem(item) ? 'opacity-40 cursor-not-allowed text-gray-400' : darkMode ? 'hover:bg-gray-600 text-gray-300' : 'hover:bg-gray-200 text-gray-600'"
+              :disabled="isProcessingItem(item)"
+            >
               <IconDelete class="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
             </button>
           </div>
@@ -309,6 +321,7 @@ import { useDirectorySort } from "@/composables/file-system/useDirectorySort.js"
 import { useFileOperations } from "@/composables/file-system/useFileOperations.js";
 import InputDialog from "@/components/common/dialogs/InputDialog.vue";
 import { createFsItemNameDialogValidator, validateFsItemName } from "@/utils/fsPathUtils.js";
+import { DEFAULT_TEXT_EDITABLE_TYPES, isFilenameTextEditable, loadTextEditableTypes } from "@/utils/textEditableTypes.js";
 
 const { t } = useI18n();
 
@@ -326,6 +339,16 @@ const OVERSCAN = 10;
 const { sortField, sortOrder, handleSort, getSortIcon, createSortedItems, initializeSortState } = useDirectorySort();
 
 const { getFileLink } = useFileOperations();
+const textEditableTypes = ref(DEFAULT_TEXT_EDITABLE_TYPES);
+
+loadTextEditableTypes().then((types) => {
+  textEditableTypes.value = types;
+});
+
+const canEditItem = (item) => {
+  if (item?.isDirectory) return false;
+  return isFilenameTextEditable(item?.name || item?.filename || "", textEditableTypes.value);
+};
 
 const props = defineProps({
   items: {
@@ -366,6 +389,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  processingPaths: {
+    type: [Array, Object],
+    default: () => [],
+  },
   // 右键菜单高亮的项目路径（用于临时高亮显示）
   contextHighlightPath: {
     type: String,
@@ -396,9 +423,29 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["navigate", "download", "getLink", "rename", "delete", "preview", "item-select", "toggle-select-all", "show-message", "contextmenu", "load-more"]);
+const emit = defineEmits(["navigate", "download", "getLink", "rename", "edit", "delete", "preview", "item-select", "toggle-select-all", "show-message", "contextmenu", "load-more"]);
 
 const sortedItems = createSortedItems(computed(() => props.items));
+
+const normalizeProcessingPath = (path) => String(path || "").replace(/\/+$/, "");
+const isProcessingPathMatch = (path, processingPath) => {
+  const normalizedPath = normalizeProcessingPath(path);
+  const normalizedProcessingPath = normalizeProcessingPath(processingPath);
+  if (!normalizedPath || !normalizedProcessingPath) return false;
+  if (normalizedPath === normalizedProcessingPath) return true;
+  return normalizedPath.startsWith(`${normalizedProcessingPath}/`);
+};
+
+const processingPathSet = computed(() => {
+  if (props.processingPaths instanceof Set) return props.processingPaths;
+  if (Array.isArray(props.processingPaths)) return new Set(props.processingPaths.map(normalizeProcessingPath));
+  return new Set();
+});
+
+const isProcessingItem = (item) => {
+  const path = normalizeProcessingPath(item?.path);
+  return Boolean(path && Array.from(processingPathSet.value).some((processingPath) => isProcessingPathMatch(path, processingPath)));
+};
 
 // ===== 虚拟滚动实现（Window Virtualizer 模式）=====
 // 虚拟列表容器引用（用于计算 scrollMargin）
@@ -617,6 +664,11 @@ const toggleSelectAll = (select) => {
 // 无论是否显示勾选框，点击文件/文件夹都应该正常导航或预览
 // 只有点击勾选框本身才切换选中状态
 const handleItemClick = (item) => {
+  if (isProcessingItem(item)) {
+    emit("show-message", { type: "warning", message: t("mount.messages.itemProcessingLocked") });
+    return;
+  }
+
   if (item.isDirectory) {
     // 对于目录，导航进入
     emit("navigate", item.path);
@@ -631,6 +683,15 @@ const handleDownload = (item) => {
   emit("download", item);
 };
 
+const handleEdit = (item) => {
+  if (isProcessingItem(item)) {
+    emit("show-message", { type: "warning", message: t("mount.messages.itemProcessingLocked") });
+    return;
+  }
+  if (!canEditItem(item)) return;
+  emit("edit", item);
+};
+
 // 重命名相关
 const showRenameDialog = ref(false);
 const itemToRename = ref(null);
@@ -639,6 +700,10 @@ const renameInput = ref(null);
 
 // 处理重命名
 const handleRename = (item) => {
+  if (isProcessingItem(item)) {
+    emit("show-message", { type: "warning", message: t("mount.messages.itemProcessingLocked") });
+    return;
+  }
   itemToRename.value = item;
   newName.value = item.name;
   showRenameDialog.value = true;
@@ -690,6 +755,10 @@ defineExpose({
 
 // 处理删除
 const handleDelete = (item) => {
+  if (isProcessingItem(item)) {
+    emit("show-message", { type: "warning", message: t("mount.messages.itemProcessingLocked") });
+    return;
+  }
   emit("delete", item);
 };
 

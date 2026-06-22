@@ -206,6 +206,15 @@ export class SystemRepository extends BaseRepository {
    * @returns {Promise<Array>} 设置项列表
    */
   async getSettingsByGroup(groupId, includeMetadata = true) {
+    const defaults = DEFAULT_SETTINGS || {};
+    const defaultKeys = Object.entries(defaults)
+      .filter(([, def]) => Number(def?.group_id) === Number(groupId))
+      .map(([key]) => key);
+
+    for (const key of defaultKeys) {
+      await this.ensureSettingMetadata(key);
+    }
+
     const orderBy = includeMetadata ? "sort_order ASC, key ASC" : "key ASC";
 
     if (includeMetadata) {

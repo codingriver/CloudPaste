@@ -78,6 +78,28 @@
           <!-- 分隔线 -->
           <div class="border-t" :class="darkMode ? 'border-gray-700' : 'border-gray-200'"></div>
 
+          <!-- 可编辑文本文件类型 -->
+          <div>
+            <label class="block text-sm font-medium mb-2" :class="darkMode ? 'text-gray-200' : 'text-gray-700'">
+              {{ t("admin.preview.textEditableTypesLabel") }}
+            </label>
+            <textarea
+              v-model="settings.preview_text_editable_exts"
+              :placeholder="t('admin.preview.textEditableTypesPlaceholder')"
+              rows="2"
+              class="w-full px-3 py-2 border rounded-lg text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-vertical"
+              :class="darkMode
+                ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
+                : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'"
+            ></textarea>
+            <p class="text-xs mt-1" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
+              {{ t("admin.preview.textEditableTypesHelp") }}
+            </p>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="border-t" :class="darkMode ? 'border-gray-700' : 'border-gray-200'"></div>
+
           <!-- 图片文件类型 -->
           <div>
             <label class="block text-sm font-medium mb-2" :class="darkMode ? 'text-gray-200' : 'text-gray-700'">
@@ -588,6 +610,7 @@ import { useThemeMode } from "@/composables/core/useThemeMode.js";
 import { useGlobalMessage } from "@/composables/core/useGlobalMessage.js";
 import { useConfirmDialog } from "@/composables/core/useConfirmDialog.js";
 import ConfirmDialog from "@/components/common/dialogs/ConfirmDialog.vue";
+import { DEFAULT_TEXT_EDITABLE_TYPES, clearTextEditableTypesCache } from "@/utils/textEditableTypes.js";
 import { createLogger } from "@/utils/logger.js";
 
 // 使用i18n
@@ -705,6 +728,7 @@ const getDuplicateProviderKeys = (rule) => {
 // 预览设置数据
 const settings = ref({
   preview_text_types: "",
+  preview_text_editable_exts: "",
   preview_image_types: "",
   preview_video_types: "",
   preview_audio_types: "",
@@ -715,6 +739,7 @@ const settings = ref({
 const defaultSettings = {
   preview_text_types:
     "txt,htm,html,xml,java,properties,sql,js,md,json,conf,ini,vue,php,py,bat,yml,yaml,go,sh,c,cpp,h,hpp,tsx,vtt,srt,ass,rs,lrc,gitignore",
+  preview_text_editable_exts: DEFAULT_TEXT_EDITABLE_TYPES,
   preview_image_types: "jpg,tiff,jpeg,png,gif,bmp,svg,ico,swf,webp,avif",
   preview_video_types: "mp4,mkv,avi,mov,rmvb,webm,flv,m3u8,ts,m2ts",
   preview_audio_types: "mp3,flac,ogg,m4a,wav,opus,wma",
@@ -960,10 +985,12 @@ const handleSaveFileTypes = async () => {
   try {
     await updatePreviewSettings({
       preview_text_types: settings.value.preview_text_types,
+      preview_text_editable_exts: settings.value.preview_text_editable_exts,
       preview_image_types: settings.value.preview_image_types,
       preview_video_types: settings.value.preview_video_types,
       preview_audio_types: settings.value.preview_audio_types,
     });
+    clearTextEditableTypesCache();
     showSuccess(t("admin.preview.saveSuccess"));
   } catch (err) {
     log.error("保存文件类型设置失败:", err);

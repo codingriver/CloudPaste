@@ -123,7 +123,7 @@ const props = defineProps({
   videoUrl: { type: String, default: null },
   darkMode: { type: Boolean, default: false },
   isAdmin: { type: Boolean, default: false },
-  // 全屏状态由父容器统一管理（挂载浏览页的工具栏全屏/播放器按钮共用同一个开关）
+  // 全屏状态由父容器统一管理（网盘管理页的工具栏全屏/播放器按钮共用同一个开关）
   isFullscreen: { type: Boolean, default: false },
   currentPath: { type: String, default: "" },
   directoryItems: { type: Array, default: () => [] },

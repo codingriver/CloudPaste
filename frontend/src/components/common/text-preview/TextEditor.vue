@@ -22,6 +22,8 @@
             :class="{ 'fallback-dark': darkMode }"
             :readonly="readOnly"
             @input="handleInput"
+            @keydown.ctrl.s.prevent="emit('save', localContent)"
+            @keydown.meta.s.prevent="emit('save', localContent)"
             :placeholder="$t('textPreview.fallbackEditor')"
           />
         </div>
@@ -86,7 +88,7 @@ const props = defineProps({
 });
 
 // Emits
-const emit = defineEmits(["change", "focus", "blur"]);
+const emit = defineEmits(["change", "focus", "blur", "save"]);
 
 // 响应式状态
 const loading = ref(true);
@@ -104,6 +106,18 @@ let focusDisposable = null;
 let blurDisposable = null;
 
 const addEditorActions = (editor, monaco) => {
+  // 保存文件
+  editor.addAction({
+    id: "save-file",
+    label: "保存文件",
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+    contextMenuGroupId: "navigation",
+    contextMenuOrder: 0,
+    run: function (ed) {
+      emit("save", ed.getValue());
+    },
+  });
+
   // 1. 切换自动换行
   editor.addAction({
     id: "toggle-word-wrap",

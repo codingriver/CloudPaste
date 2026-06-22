@@ -339,7 +339,6 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from "vue"
 import { onClickOutside, useIntersectionObserver } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
 import { useGalleryView } from "@/composables/ui-interaction/useGalleryView";
-import { useContextMenu } from "@/composables/useContextMenu";
 import { detectLivePhoto } from "@/utils/livePhotoUtils.js";
 import { IconAdjustments, IconChevronDown, IconExclamation, IconGallery, IconSortAscending } from "@/components/icons";
 import { getFileIcon } from "@/utils/fileTypeIcons";
@@ -427,72 +426,6 @@ onClickOutside(toolbarRef, () => {
   if (!showSortMenu.value && !showViewSettings.value) return;
   showSortMenu.value = false;
   showViewSettings.value = false;
-});
-
-// ===== 操作菜单相关方法 =====
-
-// 处理下载操作
-const handleDownload = (item) => {
-  emit("download", item);
-};
-
-// 处理获取链接操作
-const handleGetLink = (item) => {
-  emit("getLink", item);
-};
-
-// 处理重命名操作
-const handleRename = (item) => {
-  emit("rename", item);
-};
-
-// 处理删除操作
-const handleDelete = (items) => {
-  emit("delete", items);
-};
-
-// 处理复制操作 - 通过 contextmenu 事件传递
-const handleCopy = (items) => {
-  // 传递给父组件处理
-  emit("contextmenu", { 
-    event: null, 
-    item: Array.isArray(items) ? items[0] : items,
-    items: Array.isArray(items) ? items : [items],
-    action: 'copy'
-  });
-};
-
-// 处理添加到文件篮操作 - 通过 contextmenu 事件传递
-const handleAddToBasket = (items) => {
-  // 传递给父组件处理
-  emit("contextmenu", { 
-    event: null, 
-    item: Array.isArray(items) ? items[0] : items,
-    items: Array.isArray(items) ? items : [items],
-    action: 'add-to-basket'
-  });
-};
-
-// 处理切换勾选框显示 - 通过 contextmenu 事件传递
-const handleToggleCheckboxes = () => {
-  emit("contextmenu", { 
-    event: null, 
-    item: null,
-    items: [],
-    action: 'toggle-checkboxes'
-  });
-};
-
-// 初始化右键菜单（必须在操作函数定义之后）
-const contextMenu = useContextMenu({
-  onDownload: handleDownload,
-  onGetLink: handleGetLink,
-  onRename: handleRename,
-  onDelete: handleDelete,
-  onCopy: handleCopy,
-  onAddToBasket: handleAddToBasket,
-  onToggleCheckboxes: handleToggleCheckboxes,
-  t,
 });
 
 // 内容摘要 - 只显示图片统计
@@ -606,7 +539,7 @@ const lightboxItems = computed(() => {
   });
 });
 
-// 上下文菜单处理 - 使用统一的 useContextMenu
+// 上下文菜单处理 - 交给父组件统一生成菜单，确保列表/网格/图廊行为一致
 const handleContextMenu = (event, image) => {
   // 获取当前已选中的项目
   const selectedFiles = props.selectedItems || [];
@@ -628,8 +561,11 @@ const handleContextMenu = (event, image) => {
     itemsForMenu = [image];
   }
 
-  // 显示右键菜单（传递当前勾选框显示状态）
-  contextMenu.showContextMenu(event, image, itemsForMenu, props.darkMode, props.isCheckboxMode);
+  emit("contextmenu", {
+    event,
+    item: image,
+    items: itemsForMenu,
+  });
 };
 
 // 懒加载：IntersectionObserver（VueUse）

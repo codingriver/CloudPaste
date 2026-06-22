@@ -50,6 +50,8 @@ export const SETTING_GROUP_NAMES = {
   [SETTING_GROUPS.SYSTEM]: "系统设置",
 };
 
+export const DEFAULT_TEXT_EDITABLE_TYPES = "txt,md,json,yaml,yml,js,ts,css,html,htm,sh,bat,log,xml,ini,conf,properties,sql,vue,py,go,c,cpp,h,hpp,tsx,rs,gitignore";
+
 /**
  * 设置项默认配置
  * 定义各个设置项的元数据
@@ -160,13 +162,24 @@ export const DEFAULT_SETTINGS = {
       "txt,htm,html,xml,java,properties,sql,js,md,json,conf,ini,vue,php,py,bat,yml,yaml,go,sh,c,cpp,h,hpp,tsx,vtt,srt,ass,rs,lrc,gitignore",
   },
 
+  preview_text_editable_exts: {
+    key: "preview_text_editable_exts",
+    type: SETTING_TYPES.TEXTAREA,
+    group_id: SETTING_GROUPS.PREVIEW,
+    help: "允许在线编辑并保存的文本文件扩展名，用逗号分隔。保存统一按 UTF-8 写入。",
+    options: null,
+    sort_order: 2,
+    flag: SETTING_FLAGS.PUBLIC,
+    default_value: DEFAULT_TEXT_EDITABLE_TYPES,
+  },
+
   preview_audio_types: {
     key: "preview_audio_types",
     type: SETTING_TYPES.TEXTAREA,
     group_id: SETTING_GROUPS.PREVIEW,
     help: "支持预览的音频文件扩展名，用逗号分隔",
     options: null,
-    sort_order: 2,
+    sort_order: 3,
     flag: SETTING_FLAGS.PUBLIC,
     default_value: "mp3,flac,ogg,m4a,wav,opus,wma",
   },
@@ -177,7 +190,7 @@ export const DEFAULT_SETTINGS = {
     group_id: SETTING_GROUPS.PREVIEW,
     help: "支持预览的视频文件扩展名，用逗号分隔",
     options: null,
-    sort_order: 3,
+    sort_order: 4,
     flag: SETTING_FLAGS.PUBLIC,
     default_value: "mp4,mkv,avi,mov,rmvb,webm,flv,m3u8,ts,m2ts",
   },
@@ -188,7 +201,7 @@ export const DEFAULT_SETTINGS = {
     group_id: SETTING_GROUPS.PREVIEW,
     help: "支持预览的图片文件扩展名，用逗号分隔",
     options: null,
-    sort_order: 4,
+    sort_order: 5,
     flag: SETTING_FLAGS.PUBLIC,
     default_value: "jpg,tiff,jpeg,png,gif,bmp,svg,ico,swf,webp,avif,heic,heif",
   },
@@ -199,7 +212,7 @@ export const DEFAULT_SETTINGS = {
     group_id: SETTING_GROUPS.PREVIEW,
     help: "预览规则配置（JSON 数组），统一定义匹配条件、预览类型与可用预览器 URL 模板",
     options: null,
-    sort_order: 5,
+    sort_order: 6,
     flag: SETTING_FLAGS.PUBLIC,
     default_value: JSON.stringify(
       [

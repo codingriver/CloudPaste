@@ -171,6 +171,7 @@ export function useMountExplorerController() {
   const directoryNextCursor = computed(() => (directoryData.value && typeof directoryData.value.nextCursor === "string" ? directoryData.value.nextCursor : null));
   const directoryHasMore = computed(() => !!directoryNextCursor.value);
   const directoryLoadingMore = ref(false);
+  const directoryRefreshing = ref(false);
 
   // “待恢复滚动值”：只在“预览 → 列表”这类场景使用
   const pendingScrollRestore = ref(null);
@@ -328,6 +329,30 @@ export function useMountExplorerController() {
 
   const refreshDirectory = async () => {
     await loadDirectory(currentPath.value, { refresh: true });
+  };
+
+  const refreshDirectoryInBackground = async () => {
+    if (directoryRefreshing.value) return false;
+    const targetDirApi = currentPath.value;
+    if (!targetDirApi) return false;
+
+    directoryRefreshing.value = true;
+    try {
+      const data = await fsService.getDirectoryList(targetDirApi, { refresh: true });
+      if (!data) return false;
+      if (currentPath.value !== targetDirApi) return false;
+      stateMachine.onDirectoryLoaded(data);
+      return true;
+    } catch (e) {
+      if (e?.code === "FS_PATH_PASSWORD_REQUIRED") {
+        stateMachine.requirePassword();
+        return false;
+      }
+      error.value = e?.message || "刷新目录失败";
+      throw e;
+    } finally {
+      directoryRefreshing.value = false;
+    }
   };
 
   const refreshCurrentRoute = async () => {
@@ -680,6 +705,7 @@ export function useMountExplorerController() {
     directoryMeta,
     directoryHasMore,
     directoryLoadingMore,
+    directoryRefreshing,
     isAdmin,
     hasApiKey,
     hasFilePermission,
@@ -712,6 +738,7 @@ export function useMountExplorerController() {
     invalidateCaches,
     removeItemsFromCurrentDirectory,
     refreshDirectory,
+    refreshDirectoryInBackground,
     refreshCurrentRoute,
     prefetchDirectory,
     consumePendingScrollRestore,

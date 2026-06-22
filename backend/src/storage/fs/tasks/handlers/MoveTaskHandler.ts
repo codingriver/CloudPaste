@@ -10,6 +10,7 @@ type MoveTaskPayload = {
   items: Array<{
     sourcePath: string;
     targetPath: string;
+    isDirectory?: boolean;
   }>;
   options?: {
     maxDirectoryMoveObjects?: number;
@@ -45,6 +46,7 @@ function ensureItemResults(payload: MoveTaskPayload, stats: TaskStats): ItemResu
     kind: "move",
     sourcePath: item.sourcePath,
     targetPath: item.targetPath,
+    isDirectory: current[index]?.isDirectory ?? item.isDirectory ?? isDirectoryPathHint(item.sourcePath) ?? isDirectoryPathHint(item.targetPath),
     status: current[index]?.status || "pending",
     error: current[index]?.error,
     message: current[index]?.message,
@@ -99,6 +101,23 @@ async function resolveChunkSize(fileSystem: any, payload: MoveTaskPayload): Prom
 function sameMountAndDriver(sourceCtx: any, targetCtx: any): boolean {
   return sourceCtx?.mount?.id === targetCtx?.mount?.id &&
     sourceCtx?.driver?.getType?.() === targetCtx?.driver?.getType?.();
+}
+
+function normalizeForParent(path: string): string {
+  const normalized = String(path || "").replace(/\/+/g, "/");
+  if (!normalized || normalized === "/") return "/";
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function parentPathOf(path: string): string {
+  const normalized = normalizeForParent(path);
+  const index = normalized.lastIndexOf("/");
+  if (index <= 0) return "/";
+  return normalized.slice(0, index);
+}
+
+function sameDirectory(sourcePath: string, targetPath: string): boolean {
+  return parentPathOf(sourcePath) === parentPathOf(targetPath);
 }
 
 export class MoveTaskHandler implements TaskHandler {
@@ -349,7 +368,38 @@ export class MoveTaskHandler implements TaskHandler {
         return { done: false, message: "move delete chunk", invocationLimitReached: chunkResult?.invocationLimitReached === true };
       }
 
-      await fileSystem.renameItem(item.sourcePath, item.targetPath, job.userId, job.userType);
+      if (sameDirectory(item.sourcePath, item.targetPath)) {
+        await fileSystem.renameItem(item.sourcePath, item.targetPath, job.userId, job.userType);
+      } else {
+        const copyResult = await fileSystem.copyItem(item.sourcePath, item.targetPath, job.userId, job.userType, {
+          skipExisting: payload.options?.skipExisting === true,
+        });
+
+        if (copyResult?.status === "skipped") {
+          itemResults[currentIndex].status = "skipped";
+          itemResults[currentIndex].message = copyResult?.reason || copyResult?.message || "目标已存在，已跳过";
+          await context.updateProgress(job.jobId, {
+            processedItems: baseProcessed + 1,
+            successCount: baseSuccess,
+            failedCount: baseFailed,
+            skippedCount: baseSkipped + 1,
+            itemResults,
+            moveCheckpoint: { currentIndex: currentIndex + 1, phase: "copy", startAfter: null, activeDirectory: null, initialized: true },
+          });
+          return { done: currentIndex + 1 >= payload.items.length, message: "item skipped" };
+        }
+
+        if (copyResult?.status === "failed") {
+          throw new Error(copyResult?.message || "移动复制阶段失败");
+        }
+
+        const deleteResult = await fileSystem.batchRemoveItems([item.sourcePath], job.userId, job.userType);
+        if (Number(deleteResult?.success || 0) < 1) {
+          const failed = Array.isArray(deleteResult?.failed) ? deleteResult.failed[0] : null;
+          throw new Error(failed?.error || failed?.message || "移动删除源文件失败");
+        }
+      }
+
       itemResults[currentIndex].status = "success";
       itemResults[currentIndex].message = "移动成功";
       await context.updateProgress(job.jobId, {
@@ -395,6 +445,7 @@ export class MoveTaskHandler implements TaskHandler {
         kind: "move",
         sourcePath: item.sourcePath,
         targetPath: item.targetPath,
+        isDirectory: item.isDirectory ?? isDirectoryPathHint(item.sourcePath) ?? isDirectoryPathHint(item.targetPath),
         status: "pending" as const,
       })),
     };

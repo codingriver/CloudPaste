@@ -6,7 +6,7 @@
     >
       <!-- 标题栏 -->
       <div class="px-4 py-3 border-b flex justify-between items-center" :class="darkMode ? 'border-gray-700' : 'border-gray-200'">
-        <h3 class="text-lg font-medium" :class="darkMode ? 'text-gray-100' : 'text-gray-900'">{{ t("mount.copyModal.title") }}</h3>
+        <h3 class="text-lg font-medium" :class="darkMode ? 'text-gray-100' : 'text-gray-900'">{{ modalT("title") }}</h3>
         <button @click="closeModal" class="text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400">
           <IconClose aria-hidden="true" />
         </button>
@@ -17,7 +17,7 @@
         <!-- 已选项目信息 -->
         <div class="mb-3 text-sm" :class="darkMode ? 'text-gray-300' : 'text-gray-600'">
           {{
-            t("mount.copyModal.selectedInfo", {
+            modalT("selectedInfo", {
               count: selectedItems.length,
               folders: selectedItems.filter((item) => item.isDirectory).length,
               files: selectedItems.filter((item) => !item.isDirectory).length,
@@ -26,8 +26,19 @@
         </div>
 
         <!-- 当前路径 -->
-        <div class="mb-3 text-sm font-medium" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">
-          {{ t("mount.copyModal.targetLocation") }} <span class="font-bold">{{ currentPath }}</span>
+        <div class="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm font-medium" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">
+          <div>
+            {{ modalT("targetLocation") }} <span class="font-bold">{{ currentPath }}</span>
+          </div>
+          <button
+            type="button"
+            @click="showCreateFolderDialog = true"
+            class="inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+            :class="darkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-100' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'"
+          >
+            <IconFolderPlus class="w-4 h-4 mr-1.5" aria-hidden="true" />
+            {{ modalT("createFolder") }}
+          </button>
         </div>
 
         <!-- 警告信息 -->
@@ -43,7 +54,7 @@
           <!-- 加载状态 -->
           <div v-if="loading" class="h-full flex justify-center items-center" :class="darkMode ? 'text-gray-400' : 'text-gray-500'">
             <IconRefresh class="animate-spin mr-2" aria-hidden="true" />
-            <span>{{ t("mount.copyModal.loading") }}</span>
+            <span>{{ modalT("loading") }}</span>
           </div>
 
           <div v-else class="h-full overflow-y-auto p-1">
@@ -66,7 +77,7 @@
         </div>
 
         <!-- 复制选项 -->
-        <div class="mb-4 flex items-center">
+        <div v-if="isCopyMode" class="mb-4 flex items-center">
           <label class="flex items-center cursor-pointer select-none">
             <input
               type="checkbox"
@@ -74,7 +85,7 @@
               class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-400 dark:bg-gray-700"
             />
             <span class="ml-2 text-sm" :class="darkMode ? 'text-gray-300' : 'text-gray-700'">
-              {{ t("mount.copyModal.skipExisting") }}
+              {{ modalT("skipExisting") }}
             </span>
           </label>
           <div class="ml-2 group relative">
@@ -83,7 +94,7 @@
               class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-xs rounded-md shadow-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10"
               :class="darkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-800 text-white'"
             >
-              {{ t("mount.copyModal.skipExistingTooltip") }}
+              {{ modalT("skipExistingTooltip") }}
               <div
                 class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent"
                 :class="darkMode ? 'border-t-gray-700' : 'border-t-gray-800'"
@@ -99,15 +110,15 @@
             class="px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-300"
             :class="darkMode ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
           >
-            {{ t("mount.copyModal.cancel") }}
+            {{ modalT("cancel") }}
           </button>
           <button
-            @click="confirmCopy"
+            @click="confirmAction"
             class="px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            :class="[darkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white', copying ? 'opacity-70 cursor-not-allowed' : '']"
-            :disabled="copying"
+            :class="[darkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white', submitting ? 'opacity-70 cursor-not-allowed' : '']"
+            :disabled="submitting"
           >
-            {{ copying ? t("mount.copyModal.copying") : t("mount.copyModal.confirmCopy") }}
+            {{ submitting ? modalT("submitting") : modalT("confirm") }}
           </button>
         </div>
       </div>
@@ -118,6 +129,22 @@
       v-bind="dialogState"
       @confirm="handleConfirm"
       @cancel="handleCancel"
+    />
+    <InputDialog
+      :is-open="showCreateFolderDialog"
+      :title="modalT('createFolder')"
+      :description="modalT('createFolderDescription', { path: currentPath })"
+      :label="modalT('folderName')"
+      :placeholder="modalT('folderPlaceholder')"
+      :validator="validateFsItemNameDialog"
+      :confirm-text="modalT('createFolderConfirm')"
+      :cancel-text="modalT('cancel')"
+      :loading="isCreatingFolder"
+      :loading-text="modalT('creatingFolder')"
+      :dark-mode="darkMode"
+      @confirm="handleCreateFolderConfirm"
+      @cancel="handleCreateFolderCancel"
+      @close="handleCreateFolderCancel"
     />
   </div>
 </template>
@@ -130,13 +157,16 @@
   import { useGlobalMessage } from "@/composables/core/useGlobalMessage.js";
   import { useConfirmDialog } from "@/composables/core/useConfirmDialog.js";
   import ConfirmDialog from "@/components/common/dialogs/ConfirmDialog.vue";
-  import { IconClose, IconExclamation, IconHome, IconInformationCircle, IconRefresh } from "@/components/icons";
+  import InputDialog from "@/components/common/dialogs/InputDialog.vue";
+  import { IconClose, IconExclamation, IconFolderPlus, IconHome, IconInformationCircle, IconRefresh } from "@/components/icons";
+  import { createFsItemNameDialogValidator } from "@/utils/fsPathUtils.js";
   import { createLogger } from "@/utils/logger.js";
 
   const { t } = useI18n();
   const fsApi = useFsService();
   const { showError } = useGlobalMessage();
   const log = createLogger("CopyModal");
+  const validateFsItemNameDialog = createFsItemNameDialogValidator(t);
 
 // 确认对话框
 const { dialogState, confirm, handleConfirm, handleCancel } = useConfirmDialog();
@@ -427,9 +457,17 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  mode: {
+    type: String,
+    default: "copy",
+    validator: (value) => ["copy", "move"].includes(value),
+  },
 });
 
-const emit = defineEmits(["close", "copy-started"]);
+const emit = defineEmits(["close", "copy-started", "move-started"]);
+const isCopyMode = computed(() => props.mode === "copy");
+const modalKey = computed(() => (isCopyMode.value ? "copyModal" : "moveModal"));
+const modalT = (key, params) => t(`mount.${modalKey.value}.${key}`, params);
 
 // 计算用户的基本路径
 const userBasicPath = computed(() => {
@@ -442,24 +480,26 @@ const userBasicPath = computed(() => {
 // 计算根路径显示名称
 const rootDisplayName = computed(() => {
   if (props.isAdmin) {
-    return t("mount.copyModal.rootDirectory");
+    return modalT("rootDirectory");
   }
   // 对于API密钥用户，显示基本路径的最后一段作为根目录名称
   const basicPath = userBasicPath.value;
   if (basicPath === "/") {
-    return t("mount.copyModal.rootDirectory");
+    return modalT("rootDirectory");
   }
   const pathParts = basicPath.split("/").filter((part) => part);
-  return pathParts.length > 0 ? pathParts[pathParts.length - 1] : t("mount.copyModal.rootDirectory");
+  return pathParts.length > 0 ? pathParts[pathParts.length - 1] : modalT("rootDirectory");
 });
 
 // 状态变量
 const currentPath = ref("/");
 const rootDirectories = shallowRef([]);
 const loading = ref(false);
-const copying = ref(false);
+const submitting = ref(false);
 const pathWarning = ref(""); // 添加路径警告状态
 const skipExisting = ref(true); // 默认跳过已存在的文件
+const showCreateFolderDialog = ref(false);
+const isCreatingFolder = ref(false);
 
 // 清除目录缓存的函数，在模态窗口关闭时调用
 const clearDirectoryCache = () => {
@@ -491,6 +531,39 @@ const loadRootDirectories = async () => {
   }
 };
 
+const normalizeDirectoryPath = (path) => {
+  const value = String(path || "/");
+  return value.endsWith("/") ? value : `${value}/`;
+};
+
+const handleCreateFolderCancel = () => {
+  if (isCreatingFolder.value) return;
+  showCreateFolderDialog.value = false;
+};
+
+const handleCreateFolderConfirm = async (folderName) => {
+  const name = String(folderName || "").trim();
+  if (!name || isCreatingFolder.value) return;
+
+  isCreatingFolder.value = true;
+  try {
+    const parentPath = normalizeDirectoryPath(currentPath.value);
+    const newFolderPath = `${parentPath}${name}/`.replace(/\/{2,}/g, "/");
+    await fsApi.createDirectory(newFolderPath);
+
+    directoryCache.value.clear();
+    await loadRootDirectories();
+    currentPath.value = newFolderPath;
+    validateDestinationPath();
+    showCreateFolderDialog.value = false;
+  } catch (error) {
+    log.error("[CopyModal] 创建目标文件夹失败:", error);
+    showError(error?.message || modalT("createFolderFailed"));
+  } finally {
+    isCreatingFolder.value = false;
+  }
+};
+
 // 监听模态窗口打开状态
 watch(
   () => props.isOpen,
@@ -510,7 +583,7 @@ watch(
 
 // 关闭模态窗口
 const closeModal = () => {
-  if (copying.value) return; // 如果正在复制，不允许关闭
+  if (submitting.value) return; // 如果正在提交，不允许关闭
   emit("close");
 };
 
@@ -549,52 +622,70 @@ const selectDestination = (path) => {
 
 // 验证目标路径
 const validateDestinationPath = () => {
+  pathWarning.value = "";
+
   // 检查是否有选择的项目
   if (!props.selectedItems || props.selectedItems.length === 0) return;
 
-  // 检查是否存在将文件夹复制到其自身或其子目录的情况
+  // 检查是否存在将文件夹操作到其自身或其子目录的情况
   for (const item of props.selectedItems) {
     if (item.isDirectory) {
       const sourcePath = item.path.endsWith("/") ? item.path : item.path + "/";
 
       // 检查目标路径是否是源路径的子目录
       if (currentPath.value.startsWith(sourcePath)) {
-        pathWarning.value = t("mount.copyModal.warnings.recursiveCopy");
+        pathWarning.value = modalT(isCopyMode.value ? "warnings.recursiveCopy" : "warnings.recursiveMove");
         return;
       }
 
-      // 检查是否将文件夹复制到其自身
+      // 检查是否将文件夹操作到其自身
       if (currentPath.value === sourcePath) {
-        pathWarning.value = t("mount.copyModal.warnings.selfCopy");
+        pathWarning.value = modalT(isCopyMode.value ? "warnings.selfCopy" : "warnings.selfMove");
+        return;
+      }
+    }
+
+    if (!isCopyMode.value) {
+      const basePath = currentPath.value.endsWith("/") ? currentPath.value : currentPath.value + "/";
+      const itemName = item.name.replace(/\/+$/, "");
+      const targetPath = item.isDirectory ? `${basePath}${itemName}/` : `${basePath}${itemName}`;
+      if (targetPath === item.path) {
+        pathWarning.value = modalT("warnings.sameLocation");
         return;
       }
     }
   }
 };
 
-// 准备复制项目
-const prepareCopyItems = () => {
+// 准备批量操作项目
+const prepareBatchItems = () => {
   return props.selectedItems.map((item) => {
     // 确保目标路径正确拼接，避免双斜杠
     const basePath = currentPath.value.endsWith('/') ? currentPath.value : currentPath.value + '/';
-    const targetPath = `${basePath}${item.name}`;
+    const itemName = item.name.replace(/\/+$/, "");
+    const targetPath = `${basePath}${itemName}`;
     return {
       sourcePath: item.path,
       targetPath: item.isDirectory && !targetPath.endsWith("/") ? `${targetPath}/` : targetPath,
+      isDirectory: !!item.isDirectory,
     };
   });
 };
 
 
-// 创建复制任务
-const createCopyTask = (itemCount, jobId = null) => {
+// 创建前端任务
+const createFrontendTask = (itemCount, jobId = null, batchItems = []) => {
   const taskManager = useTaskManager();
-  const taskId = taskManager.addTask(TaskType.COPY, t("mount.taskManager.copyTaskName", { count: itemCount, path: currentPath.value }), itemCount);
+  const taskType = isCopyMode.value ? TaskType.COPY : TaskType.MOVE;
+  const taskNameKey = isCopyMode.value ? "copyTaskName" : "moveTaskName";
+  const taskId = taskManager.addTask(taskType, t(`mount.taskManager.${taskNameKey}`, { count: itemCount, path: currentPath.value }), itemCount);
 
   // 准备任务详情
   const taskDetails = {
     total: itemCount,
     processed: 0,
+    affectedPaths: batchItems.map((item) => item.sourcePath).filter(Boolean),
+    targetPaths: batchItems.map((item) => item.targetPath).filter(Boolean),
   };
 
   // 如果是作业模式，记录 jobId 到任务详情中
@@ -608,20 +699,25 @@ const createCopyTask = (itemCount, jobId = null) => {
   return { taskManager, taskId };
 };
 
-// 确认复制
-const confirmCopy = async () => {
-  if (copying.value) return;
+// 确认批量操作
+const confirmAction = async () => {
+  if (submitting.value) return;
 
   // 先验证路径
   validateDestinationPath();
 
-  // 如果有警告，需要用户确认
+  // 移动到自身或子目录会破坏路径语义，直接阻止；复制仍保留原有确认流程。
   if (pathWarning.value) {
+    if (!isCopyMode.value) {
+      showError(pathWarning.value);
+      return;
+    }
+
     const confirmed = await confirm({
-      title: t("mount.copyModal.warningTitle", "复制警告"),
-      message: t("mount.copyModal.confirmPotentialIssue", { warning: pathWarning.value }),
+      title: modalT("warningTitle"),
+      message: modalT("confirmPotentialIssue", { warning: pathWarning.value }),
       confirmType: "warning",
-      confirmText: t("mount.copyModal.continueCopy", "继续复制"),
+      confirmText: modalT("continue"),
       darkMode: props.darkMode,
     });
     if (!confirmed) {
@@ -629,32 +725,29 @@ const confirmCopy = async () => {
     }
   }
 
-  copying.value = true;
+  submitting.value = true;
 
   try {
-    // 准备复制项目
-    const copyItems = prepareCopyItems();
-
-    // ========== 统一任务模式 ==========
-    // 所有复制操作统一走任务系统，无条件分支
-    // 复制策略（同存储/跨存储/S3优化）由后端 CopyTaskHandler 内部决策
-    // 调用后端 batch-copy API（现在始终返回 jobId）
-    const response = await fsApi.batchCopyItems(copyItems, {
-      skipExisting: skipExisting.value,
-    });
+    const batchItems = prepareBatchItems();
+    const response = isCopyMode.value
+      ? await fsApi.batchCopyItems(batchItems, {
+          skipExisting: skipExisting.value,
+        })
+      : await fsApi.batchMoveItems(batchItems);
 
     if (!response.success || !response.data?.jobId) {
-      throw new Error(response.message || '创建复制作业失败');
+      throw new Error(response.message || modalT("createFailed"));
     }
 
     const jobId = response.data.jobId;
 
     // 创建前端任务追踪，并在 details 中记录 jobId
-    const { taskManager, taskId } = createCopyTask(props.selectedItems.length, jobId);
+    const { taskManager, taskId } = createFrontendTask(props.selectedItems.length, jobId, batchItems);
 
-    // 发出复制开始事件
-    emit("copy-started", {
-      message: t("mount.taskManager.copyStarted", {
+    const startedEventName = isCopyMode.value ? "copy-started" : "move-started";
+    const startedMessageKey = isCopyMode.value ? "copyStarted" : "moveStarted";
+    emit(startedEventName, {
+      message: t(`mount.taskManager.${startedMessageKey}`, {
         count: props.selectedItems.length,
         path: currentPath.value,
       }),
@@ -666,13 +759,13 @@ const confirmCopy = async () => {
 
     // 立即关闭模态框
     emit("close");
-    copying.value = false;
+    submitting.value = false;
   } catch (error) {
     // 如果 API 请求失败，保持模态框打开并显示错误
     // 注意：此时尚未创建前端任务，无需标记任何任务为失败
-    log.error("[CopyModal] 复制启动失败:", error);
-    showError(error.message || t('mount.copyModal.copyFailed'));
-    copying.value = false;
+    log.error(`[CopyModal] ${props.mode} 启动失败:`, error);
+    showError(error.message || modalT("failed"));
+    submitting.value = false;
   }
 };
 </script>

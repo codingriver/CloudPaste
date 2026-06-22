@@ -101,7 +101,7 @@ export default {
     uploadSubtitle: "File Upload",
     pasteViewSubtitle: "View Share",
     fileViewSubtitle: "File Preview",
-    mountExplorerSubtitle: "Mount Explorer",
+    mountExplorerSubtitle: "Drive Management",
     notFoundSubtitle: "Page Not Found",
     // Admin module titles
     adminModules: {
@@ -125,7 +125,7 @@ export default {
   nav: {
     home: "Text Editor",
     upload: "File Upload",
-    mountExplorer: "Mount Explorer",
+    mountExplorer: "Drive Management",
     admin: "Admin Panel",
     menu: "Main Menu",
   },

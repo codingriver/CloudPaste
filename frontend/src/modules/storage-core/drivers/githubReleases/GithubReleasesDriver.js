@@ -3,7 +3,7 @@ import { createCapabilities } from "../types.js";
 /**
  * GITHUB_RELEASES 存储驱动
  *
- * - GitHub Releases 在后端是“只读渠道”（主要用于挂载浏览/下载）
+ * - GitHub Releases 在后端是“只读渠道”（主要用于网盘管理/下载）
  * - 提供任何上传能力，避免误操作
  */
 export class GithubReleasesDriver {
@@ -43,4 +43,3 @@ export class GithubReleasesDriver {
     return this.config?.id ?? null;
   }
 }
-

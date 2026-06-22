@@ -486,7 +486,7 @@ const handleClearAnnouncementContent = () => {
           <!-- 分隔线 -->
           <div class="border-t" :class="darkMode ? 'border-gray-700' : 'border-gray-200'"></div>
 
-          <!-- 挂载浏览入口开关 -->
+          <!-- 网盘管理入口开关 -->
           <div class="flex items-center justify-between gap-4">
             <div class="flex-1 min-w-0">
               <label class="block text-sm font-medium" :class="darkMode ? 'text-gray-200' : 'text-gray-700'">

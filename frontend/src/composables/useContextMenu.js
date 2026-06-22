@@ -10,10 +10,16 @@ import {
   IconDownload,
   IconLink,
   IconCopy,
+  IconArrowRight,
   IconShoppingCart,
   IconCheckbox,
   IconRename,
-  IconDelete
+  IconDelete,
+  IconEye,
+  IconInformationCircle,
+  IconRefresh,
+  IconDocumentText,
+  IconArchive,
 } from '@/components/icons'
 
 // 图标渲染函数
@@ -21,9 +27,15 @@ const icons = {
   download: () => h(IconDownload, { size: 'sm' }),
   link: () => h(IconLink, { size: 'sm' }),
   copy: () => h(IconCopy, { size: 'sm' }),
+  move: () => h(IconArrowRight, { size: 'sm' }),
   basket: () => h(IconShoppingCart, { size: 'sm' }),
   checkbox: () => h(IconCheckbox, { size: 'sm' }),
   edit: () => h(IconRename, { size: 'sm' }),
+  preview: () => h(IconEye, { size: 'sm' }),
+  properties: () => h(IconInformationCircle, { size: 'sm' }),
+  refresh: () => h(IconRefresh, { size: 'sm' }),
+  path: () => h(IconDocumentText, { size: 'sm' }),
+  zip: () => h(IconArchive, { size: 'sm' }),
   delete: () => h(IconDelete, { size: 'sm', class: 'text-red-500' }),
 }
 
@@ -41,7 +53,25 @@ const icons = {
  * @returns {Object} 右键菜单方法
  */
 export function useContextMenu(options = {}) {
-  const { onDownload, onGetLink, onRename, onDelete, onCopy, onAddToBasket, onToggleCheckboxes, t } = options
+  const {
+    onOpen,
+    onDownload,
+    onGetLink,
+    onRename,
+    onDelete,
+    onCopy,
+    onMove,
+    onProperties,
+    onCopyPath,
+    onCopyName,
+    onZipDownload,
+    onAddToBasket,
+    onToggleCheckboxes,
+    onRefresh,
+    canWrite = true,
+    t,
+  } = options
+  const canWriteNow = () => (typeof canWrite === 'function' ? canWrite() : canWrite)
   
   // 当前选中的项目
   const contextItem = ref(null)
@@ -53,8 +83,13 @@ export function useContextMenu(options = {}) {
    */
   function generateFileMenuItems(item) {
     const items = []
-    
-    // 下载（仅文件）
+
+    items.push({
+      label: item.isDirectory ? (t?.('mount.contextMenu.open') || '打开') : (t?.('mount.fileItem.preview') || '预览'),
+      icon: icons.preview,
+      onClick: () => onOpen?.(item),
+    })
+
     if (!item.isDirectory) {
       items.push({
         label: t?.('mount.fileItem.download') || '下载',
@@ -67,41 +102,74 @@ export function useContextMenu(options = {}) {
         label: t?.('mount.fileItem.getLink') || '获取链接',
         icon: icons.link,
         onClick: () => onGetLink?.(item),
-        divided: 'down',
       })
     }
-    
-    // 复制
+
     items.push({
-      label: t?.('mount.fileItem.copy') || '复制',
-      icon: icons.copy,
-      onClick: () => onCopy?.(item),
-    })
-    
-    // 添加到文件篮
-    items.push({
-      label: t?.('mount.contextMenu.addToBasket') || '添加到文件篮',
-      icon: icons.basket,
-      onClick: () => onAddToBasket?.(item),
+      label: item.isDirectory ? (t?.('mount.contextMenu.downloadZip') || '打包下载 ZIP') : (t?.('mount.contextMenu.downloadZip') || '打包下载 ZIP'),
+      icon: icons.zip,
+      onClick: () => onZipDownload?.(item),
       divided: 'down',
     })
-    
-    // 重命名（仅文件）
+
+    // 复制
+    if (canWriteNow()) {
+      items.push({
+        label: t?.('mount.fileItem.copy') || '复制',
+        icon: icons.copy,
+        onClick: () => onCopy?.(item),
+      })
+
+      items.push({
+        label: t?.('mount.fileItem.move') || '移动',
+        icon: icons.move,
+        onClick: () => onMove?.(item),
+      })
+    }
+
     if (!item.isDirectory) {
+      items.push({
+        label: t?.('mount.contextMenu.addToBasket') || '添加到文件篮',
+        icon: icons.basket,
+        onClick: () => onAddToBasket?.(item),
+      })
+    }
+
+    items.push({
+      label: t?.('mount.contextMenu.copyPath') || '复制路径',
+      icon: icons.path,
+      onClick: () => onCopyPath?.(item),
+    })
+
+    items.push({
+      label: t?.('mount.contextMenu.copyName') || '复制名称',
+      icon: icons.path,
+      onClick: () => onCopyName?.(item),
+    })
+
+    items.push({
+      label: t?.('mount.fileItem.properties') || '属性',
+      icon: icons.properties,
+      onClick: () => onProperties?.(item),
+      divided: canWriteNow() ? undefined : 'down',
+    })
+
+    if (canWriteNow()) {
+      // 重命名
       items.push({
         label: t?.('mount.fileItem.rename') || '重命名',
         icon: icons.edit,
         onClick: () => onRename?.(item),
       })
+
+      // 删除
+      items.push({
+        label: t?.('mount.fileItem.delete') || '删除',
+        icon: icons.delete,
+        customClass: 'context-menu-danger',
+        onClick: () => onDelete?.(item),
+      })
     }
-    
-    // 删除
-    items.push({
-      label: t?.('mount.fileItem.delete') || '删除',
-      icon: icons.delete,
-      customClass: 'context-menu-danger',
-      onClick: () => onDelete?.(item),
-    })
     
     return items
   }
@@ -115,8 +183,13 @@ export function useContextMenu(options = {}) {
   function generateBatchMenuItems(selectedItems) {
     const hasFiles = selectedItems.some(item => !item.isDirectory)
     const items = []
-    
-    // 批量下载（仅当有文件时）
+
+    items.push({
+      label: t?.('mount.contextMenu.batchDownloadZip') || '批量下载 ZIP',
+      icon: icons.zip,
+      onClick: () => onZipDownload?.(selectedItems),
+    })
+
     if (hasFiles) {
       items.push({
         label: t?.('mount.contextMenu.batchDownload') || '批量下载',
@@ -124,29 +197,51 @@ export function useContextMenu(options = {}) {
         onClick: () => selectedItems.filter(i => !i.isDirectory).forEach(i => onDownload?.(i)),
       })
     }
-    
-    // 批量复制
+
+    if (canWriteNow()) {
+      items.push({
+        label: t?.('mount.contextMenu.batchCopy') || '批量复制',
+        icon: icons.copy,
+        onClick: () => onCopy?.(selectedItems),
+      })
+
+      items.push({
+        label: t?.('mount.contextMenu.batchMove') || '批量移动',
+        icon: icons.move,
+        onClick: () => onMove?.(selectedItems),
+      })
+    }
+
+    if (hasFiles) {
+      items.push({
+        label: t?.('mount.contextMenu.batchAddToBasket') || '批量添加到文件篮',
+        icon: icons.basket,
+        onClick: () => onAddToBasket?.(selectedItems),
+      })
+    }
+
     items.push({
-      label: t?.('mount.contextMenu.batchCopy') || '批量复制',
-      icon: icons.copy,
-      onClick: () => onCopy?.(selectedItems),
+      label: t?.('mount.contextMenu.copyPath') || '复制路径',
+      icon: icons.path,
+      onClick: () => onCopyPath?.(selectedItems),
     })
-    
-    // 批量添加到文件篮
+
     items.push({
-      label: t?.('mount.contextMenu.batchAddToBasket') || '批量添加到文件篮',
-      icon: icons.basket,
-      onClick: () => onAddToBasket?.(selectedItems),
-      divided: 'down', // 在此项下方添加分隔线
+      label: t?.('mount.contextMenu.properties') || '属性',
+      icon: icons.properties,
+      onClick: () => onProperties?.(selectedItems),
+      divided: canWriteNow() ? undefined : 'down',
     })
-    
-    // 批量删除
-    items.push({
-      label: t?.('mount.contextMenu.batchDelete') || '批量删除',
-      icon: icons.delete,
-      customClass: 'context-menu-danger',
-      onClick: () => onDelete?.(selectedItems),
-    })
+
+    if (canWriteNow()) {
+      // 批量删除
+      items.push({
+        label: t?.('mount.contextMenu.batchDelete') || '批量删除',
+        icon: icons.delete,
+        customClass: 'context-menu-danger',
+        onClick: () => onDelete?.(selectedItems),
+      })
+    }
     
     return items
   }
@@ -180,6 +275,14 @@ export function useContextMenu(options = {}) {
         icon: icons.checkbox,
         onClick: () => onToggleCheckboxes?.(),
         divided: 'down', // 在此项下方添加分隔线
+      })
+    }
+
+    if (onRefresh) {
+      menuItems.push({
+        label: t?.('mount.contextMenu.refresh') || '刷新',
+        icon: icons.refresh,
+        onClick: () => onRefresh?.(),
       })
     }
     

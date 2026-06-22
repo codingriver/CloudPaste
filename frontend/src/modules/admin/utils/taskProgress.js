@@ -34,6 +34,11 @@ const numeric = (value) => {
 
 const isDirectoryPath = (path) => typeof path === 'string' && path.endsWith('/')
 
+const isDirectoryItem = (item) => {
+  if (item?.isDirectory === true) return true
+  return isDirectoryPath(item?.sourcePath) || isDirectoryPath(item?.targetPath) || isDirectoryPath(item?.label)
+}
+
 export const getItemOperationDetails = (item) => {
   const meta = item?.meta || {}
   if (meta.moveDeleteDetails) return meta.moveDeleteDetails
@@ -50,6 +55,7 @@ export const getObjectProgress = (taskOrStats) => {
     skipped: 0,
     deduped: 0,
     knownTotal: false,
+    unknownDirectories: 0,
   }
 
   for (const item of items) {
@@ -67,8 +73,8 @@ export const getObjectProgress = (taskOrStats) => {
       continue
     }
 
-    const path = item?.sourcePath || item?.targetPath || item?.label || ''
-    if (isDirectoryPath(path)) {
+    if (isDirectoryItem(item)) {
+      result.unknownDirectories += 1
       continue
     }
 

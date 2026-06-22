@@ -30,6 +30,8 @@ export interface ItemResult {
   /** copy 语义字段（可选，copy 任务必填；其他任务可不填） */
   sourcePath?: string;
   targetPath?: string;
+  /** 是否目录；用于 UI 区分路径进度和对象进度，避免仅靠尾斜杠猜测。 */
+  isDirectory?: boolean;
 
   status: ItemStatus;
   error?: string;              // 失败时的错误信息
@@ -70,6 +72,7 @@ export interface CopyTaskPayload {
   items: Array<{
     sourcePath: string;
     targetPath: string;
+    isDirectory?: boolean;
   }>;
   options?: {
     skipExisting?: boolean;

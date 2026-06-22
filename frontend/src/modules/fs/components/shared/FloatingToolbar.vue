@@ -81,9 +81,21 @@
             <IconFolderPlus size="sm" class="w-[18px] h-[18px]" />
           </SpeedDialItem>
 
+          <!-- 新建文本按钮 -->
+          <SpeedDialItem
+            v-if="canWrite"
+            :delay="150"
+            :tooltip="t('mount.toolbar.newTextFile')"
+            :dark-mode="darkMode"
+            :expanded="isExpanded"
+            @click="handleNewTextFile"
+          >
+            <IconDocumentText size="sm" class="w-[18px] h-[18px]" />
+          </SpeedDialItem>
+
           <!-- 刷新按钮 -->
           <SpeedDialItem
-            :delay="150"
+            :delay="175"
             :tooltip="t('mount.toolbar.refresh')"
             :dark-mode="darkMode"
             :expanded="isExpanded"
@@ -126,6 +138,7 @@ import {
   IconTaskList,
   IconUpload,
   IconFolderPlus,
+  IconDocumentText,
   IconRefresh,
   IconMenu,
   IconClose
@@ -196,6 +209,7 @@ const props = defineProps({
 const emit = defineEmits([
   'refresh',
   'new-folder',
+  'new-text-file',
   'upload',
   'toggle-checkboxes',
   'open-basket',
@@ -252,6 +266,10 @@ function handleRefresh() {
 
 function handleNewFolder() {
   emit('new-folder')
+}
+
+function handleNewTextFile() {
+  emit('new-text-file')
 }
 
 function handleUpload() {
