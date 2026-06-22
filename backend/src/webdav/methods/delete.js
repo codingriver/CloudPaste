@@ -9,6 +9,7 @@ import { createWebDAVErrorResponse, withWebDAVErrorHandling } from "../utils/err
 import { getStandardWebDAVHeaders } from "../utils/headerUtils.js";
 import { lockManager } from "../utils/LockManager.js";
 import { checkLockPermission } from "../utils/lockUtils.js";
+import { assertNoInvocationLimitResult } from "../utils/invocationUtils.js";
 
 /**
  * 处理DELETE请求
@@ -48,6 +49,7 @@ export async function handleDelete(c, path, userId, userType, db) {
 
     console.log(`WebDAV DELETE - 开始删除: ${path}, userType=${userType}`);
     const result = await fileSystem.batchRemoveItems([path], userId, userType);
+    assertNoInvocationLimitResult(result, "DELETE", path);
     console.log(`WebDAV DELETE - 删除结果: success=${result.success}, failed=${result.failed?.length || 0}`);
 
     if (result.failed && result.failed.length > 0) {
@@ -76,4 +78,3 @@ export async function handleDelete(c, path, userId, userType, db) {
     });
   }, { includeDetails: false, useXmlResponse: false });
 }
-

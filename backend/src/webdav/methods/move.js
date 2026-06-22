@@ -12,6 +12,7 @@ import { getStandardWebDAVHeaders } from "../utils/headerUtils.js";
 import { lockManager } from "../utils/LockManager.js";
 import { checkLockPermission } from "../utils/lockUtils.js";
 import { parseDestinationPath } from "../utils/webdavUtils.js";
+import { assertNoInvocationLimitResult, isInvocationLimitError } from "../utils/invocationUtils.js";
 
 /**
  * 处理WebDAV MOVE请求
@@ -97,6 +98,7 @@ export async function handleMove(c, path, userId, userType, db) {
     const copyResult = await fileSystem.copyItem(path, destPath, userId, userType, {
       skipExisting: overwrite === "F", // Overwrite: F 表示不覆盖，即跳过已存在的文件
     });
+    assertNoInvocationLimitResult(copyResult, "MOVE copy phase", path);
 
     console.log(`WebDAV MOVE - 复制结果:`, copyResult);
 
@@ -105,6 +107,7 @@ export async function handleMove(c, path, userId, userType, db) {
 
     try {
       const deleteResult = await fileSystem.batchRemoveItems([path], userId, userType);
+      assertNoInvocationLimitResult(deleteResult, "MOVE delete phase", path);
       console.log(`WebDAV MOVE - 删除结果: 成功=${deleteResult.success}, 失败=${deleteResult.failed?.length || 0}`);
 
       if (deleteResult.failed && deleteResult.failed.length > 0) {
@@ -113,23 +116,36 @@ export async function handleMove(c, path, userId, userType, db) {
 
         try {
           // 回滚：删除已复制的目标文件
-          await fileSystem.batchRemoveItems([destPath], userId, userType);
+          const rollbackResult = await fileSystem.batchRemoveItems([destPath], userId, userType);
+          assertNoInvocationLimitResult(rollbackResult, "MOVE rollback phase", destPath);
           console.log(`WebDAV MOVE - 回滚成功：已删除目标文件 ${destPath}`);
         } catch (rollbackError) {
+          if (isInvocationLimitError(rollbackError)) {
+            throw rollbackError;
+          }
           console.error(`WebDAV MOVE - 回滚失败: ${rollbackError.message}`, rollbackError);
         }
 
         return createWebDAVErrorResponse(`移动失败：无法删除源文件 - ${deleteResult.failed[0]?.error}`, 500, false);
       }
     } catch (deleteError) {
+      const deleteHitInvocationLimit = isInvocationLimitError(deleteError);
       console.error(`WebDAV MOVE - 删除源文件异常: ${deleteError.message}`, deleteError);
 
       try {
         // 回滚：删除已复制的目标文件
-        await fileSystem.batchRemoveItems([destPath], userId, userType);
+        const rollbackResult = await fileSystem.batchRemoveItems([destPath], userId, userType);
+        assertNoInvocationLimitResult(rollbackResult, "MOVE rollback phase", destPath);
         console.log(`WebDAV MOVE - 回滚成功：已删除目标文件 ${destPath}`);
       } catch (rollbackError) {
+        if (isInvocationLimitError(rollbackError)) {
+          throw rollbackError;
+        }
         console.error(`WebDAV MOVE - 回滚失败: ${rollbackError.message}`, rollbackError);
+      }
+
+      if (deleteHitInvocationLimit) {
+        throw deleteError;
       }
 
       return createWebDAVErrorResponse(`移动失败：删除源文件异常 - ${deleteError.message}`, 500, false);

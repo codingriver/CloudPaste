@@ -10,6 +10,7 @@ import { getStandardWebDAVHeaders } from "../utils/headerUtils.js";
 import { parseDestinationPath } from "../utils/webdavUtils.js";
 import { lockManager } from "../utils/LockManager.js";
 import { checkLockPermission } from "../utils/lockUtils.js";
+import { assertNoInvocationLimitResult } from "../utils/invocationUtils.js";
 
 /**
  * 处理COPY请求
@@ -89,6 +90,7 @@ export async function handleCopy(c, path, userId, userType, db) {
     const result = await fileSystem.copyItem(path, destPath, userId, userType, {
       skipExisting: overwrite === "F", // Overwrite: F 表示不覆盖，即跳过已存在的文件
     });
+    assertNoInvocationLimitResult(result, "COPY", path);
 
     // console.log(`WebDAV COPY - 复制结果:`, result);
 

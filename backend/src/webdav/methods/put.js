@@ -12,6 +12,7 @@ import { ValidationError } from "../../http/errors.js";
 import { getSettingsByGroup } from "../../services/systemService.js";
 import { lockManager } from "../utils/LockManager.js";
 import { checkLockPermission } from "../utils/lockUtils.js";
+import { assertNoInvocationLimitResult } from "../utils/invocationUtils.js";
 
 /**
  * 获取WebDAV上传模式设置
@@ -137,6 +138,7 @@ export async function handlePut(c, path, userId, userType, db) {
         contentType,
         contentLength: 0,
       });
+      assertNoInvocationLimitResult(result, "PUT empty file", path);
 
       console.log(`WebDAV PUT - 空文件上传成功，ETag: ${result.etag}`);
 
@@ -185,6 +187,7 @@ export async function handlePut(c, path, userId, userType, db) {
           contentType,
           contentLength: effectiveLength,
         });
+        assertNoInvocationLimitResult(result, "PUT single upload", path);
         const duration = Date.now() - startTime;
 
         const speedMBps = effectiveLength > 0 ? (effectiveLength / 1024 / 1024 / (duration / 1000)).toFixed(2) : "未知";
@@ -215,6 +218,7 @@ export async function handlePut(c, path, userId, userType, db) {
           contentType,
           contentLength: declaredContentLength,
         });
+        assertNoInvocationLimitResult(result, "PUT chunked upload", path);
         const duration = Date.now() - startTime;
 
         const speedMBps = declaredContentLength > 0 ? (declaredContentLength / 1024 / 1024 / (duration / 1000)).toFixed(2) : "未知";
@@ -237,4 +241,3 @@ export async function handlePut(c, path, userId, userType, db) {
     }
   }, { includeDetails: true });
 }
-

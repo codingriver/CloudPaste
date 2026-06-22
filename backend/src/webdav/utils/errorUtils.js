@@ -4,6 +4,7 @@
  */
 
 import { getWebDAVErrorHeaders } from "./headerUtils.js";
+import { isInvocationLimitError, isPayloadLimitError, isTemporaryUpstreamLimitError, WEBDAV_INVOCATION_ERROR_CODE } from "./invocationUtils.js";
 
 /**
  * 生成唯一错误ID
@@ -37,10 +38,12 @@ function getStatusText(statusCode) {
     405: "Method Not Allowed",
     409: "Conflict",
     412: "Precondition Failed",
+    413: "Payload Too Large",
     415: "Unsupported Media Type",
     423: "Locked",
     500: "Internal Server Error",
     501: "Not Implemented",
+    503: "Service Unavailable",
     507: "Insufficient Storage",
   };
 
@@ -74,6 +77,42 @@ export function createStandardWebDAVErrorResponse(message, status) {
 }
 
 /**
+ * 创建带 responsedescription 和可机读错误码的 WebDAV 错误响应。
+ * @param {string} message
+ * @param {number} status
+ * @param {{code?: string, description?: string, retryAfter?: string|number|null}} options
+ * @returns {Response}
+ */
+export function createDetailedWebDAVErrorResponse(message, status, options = {}) {
+  const { code = null, description = null, retryAfter = null } = options;
+  const escapedMessage = escapeXmlChars(message);
+  const escapedDescription = escapeXmlChars(description || message);
+  const escapedCode = escapeXmlChars(code || "");
+  const statusText = getStatusText(status);
+
+  const codeXml = code ? `\n  <D:error-code>${escapedCode}</D:error-code>` : "";
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<D:error xmlns:D="DAV:">
+  <D:status>HTTP/1.1 ${status} ${statusText}</D:status>${codeXml}
+  <D:message>${escapedMessage}</D:message>
+  <D:responsedescription>${escapedDescription}</D:responsedescription>
+</D:error>`;
+
+  const headers = getWebDAVErrorHeaders("application/xml; charset=utf-8");
+  if (code) {
+    headers["X-CloudPaste-Error-Code"] = code;
+  }
+  if (retryAfter != null) {
+    headers["Retry-After"] = String(retryAfter);
+  }
+
+  return new Response(xml, {
+    status,
+    headers,
+  });
+}
+
+/**
  * 记录WebDAV操作错误并创建统一的错误响应
  * @param {string} operation - 操作名称，如 "GET", "PUT" 等
  * @param {Error} error - 错误对象
@@ -87,6 +126,41 @@ export function handleWebDAVError(operation, error, includeDetails = false, useX
 
   // 记录错误信息
   console.error(`WebDAV ${operation} 操作错误 [${errorId}]:`, error);
+
+  if (isInvocationLimitError(error)) {
+    return createDetailedWebDAVErrorResponse(
+      "Worker invocation limit reached",
+      507,
+      {
+        code: WEBDAV_INVOCATION_ERROR_CODE,
+        description:
+          "Worker invocation limit reached. The synchronous WebDAV operation was not completed. Please check the file manager and retry with a smaller operation.",
+      }
+    );
+  }
+
+  if (isPayloadLimitError(error)) {
+    return createDetailedWebDAVErrorResponse(
+      "Payload too large",
+      413,
+      {
+        code: "PAYLOAD_TOO_LARGE",
+        description: "The WebDAV request body is too large for synchronous processing.",
+      }
+    );
+  }
+
+  if (isTemporaryUpstreamLimitError(error)) {
+    return createDetailedWebDAVErrorResponse(
+      "Temporary upstream limit",
+      503,
+      {
+        code: "TEMPORARY_UPSTREAM_LIMIT",
+        description: "The upstream storage service is temporarily unavailable or rate limited. Please retry later.",
+        retryAfter: 10,
+      }
+    );
+  }
 
   if (error.status && typeof error.status === "number") {
     const statusCode = error.status;
