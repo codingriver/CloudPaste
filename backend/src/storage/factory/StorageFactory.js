@@ -11,6 +11,7 @@ import { LocalStorageDriver } from "../drivers/local/LocalStorageDriver.js";
 import { OneDriveStorageDriver } from "../drivers/onedrive/OneDriveStorageDriver.js";
 import { GoogleDriveStorageDriver } from "../drivers/googledrive/GoogleDriveStorageDriver.js";
 import { GithubReleasesStorageDriver } from "../drivers/github/GithubReleasesStorageDriver.js";
+import { GithubReleaseEncryptedStorageDriver } from "../drivers/github/GithubReleaseEncryptedStorageDriver.js";
 import { GithubApiStorageDriver } from "../drivers/github/GithubApiStorageDriver.js";
 import { TelegramStorageDriver } from "../drivers/telegram/TelegramStorageDriver.js";
 import { HuggingFaceDatasetsStorageDriver } from "../drivers/huggingface-datasets/HuggingFaceDatasetsStorageDriver.js";
@@ -19,6 +20,7 @@ import { DiscordStorageDriver } from "../drivers/discord/DiscordStorageDriver.js
 import { huggingFaceDatasetsTestConnection } from "../drivers/huggingface-datasets/tester/HuggingFaceDatasetsTester.js";
 import { githubApiTestConnection } from "../drivers/github/tester/GithubApiTester.js";
 import { githubReleasesTestConnection } from "../drivers/github/tester/GithubReleasesTester.js";
+import { githubReleaseEncryptedTestConnection } from "../drivers/github/tester/GithubReleaseEncryptedTester.js";
 import { googleDriveTestConnection } from "../drivers/googledrive/tester/GoogleDriveTester.js";
 import { telegramTestConnection } from "../drivers/telegram/tester/TelegramTester.js";
 import { mirrorTestConnection } from "../drivers/mirror/tester/MirrorTester.js";
@@ -169,6 +171,7 @@ export class StorageFactory {
     ONEDRIVE: "ONEDRIVE",
     GOOGLE_DRIVE: "GOOGLE_DRIVE",
     GITHUB_RELEASES: "GITHUB_RELEASES",
+    GITHUB_RELEASE_ENCRYPTED: "GITHUB_RELEASE_ENCRYPTED",
     GITHUB_API: "GITHUB_API",
     TELEGRAM: "TELEGRAM",
     DISCORD: "DISCORD",
@@ -662,6 +665,44 @@ export class StorageFactory {
       const value = Number(config.per_page);
       if (!Number.isFinite(value) || value <= 0) {
         errors.push("GitHub Releases 配置字段 per_page 必须是大于 0 的数字");
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  static _validateGithubReleaseEncryptedConfig(config) {
+    const errors = [];
+    const owner = config?.owner ? String(config.owner).trim() : "";
+    const repo = config?.repo ? String(config.repo).trim() : "";
+    const releaseId = config?.release_id ? String(config.release_id).trim() : "";
+    const releaseTag = config?.release_tag ? String(config.release_tag).trim() : "";
+
+    if (!owner) errors.push("GitHub Release 加密存储缺少必填字段: owner");
+    if (!repo) errors.push("GitHub Release 加密存储缺少必填字段: repo");
+    if (!releaseId && !releaseTag) errors.push("GitHub Release 加密存储需要填写 release_id 或 release_tag");
+
+    const apiBase = config?.api_base ? String(config.api_base).trim() : "";
+    if (apiBase) {
+      try {
+        const parsed = new URL(apiBase);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          errors.push("api_base 必须以 http:// 或 https:// 开头");
+        }
+      } catch {
+        errors.push("api_base 格式无效");
+      }
+    }
+
+    const uploadBase = config?.upload_base ? String(config.upload_base).trim() : "";
+    if (uploadBase) {
+      try {
+        const parsed = new URL(uploadBase);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          errors.push("upload_base 必须以 http:// 或 https:// 开头");
+        }
+      } catch {
+        errors.push("upload_base 格式无效");
       }
     }
 
@@ -1720,6 +1761,198 @@ StorageFactory.registerDriver(StorageFactory.SUPPORTED_TYPES.GITHUB_RELEASES, {
         },
       ],
       summaryFields: ["repo_structure", "show_all_version", "show_source_code", "show_release_notes"],
+    },
+  },
+});
+
+// 注册 GitHub Release 加密存储库（控制面 + 客户端直连文件流）
+StorageFactory.registerDriver(StorageFactory.SUPPORTED_TYPES.GITHUB_RELEASE_ENCRYPTED, {
+  ctor: GithubReleaseEncryptedStorageDriver,
+  tester: githubReleaseEncryptedTestConnection,
+  displayName: "GitHub Release 加密存储库",
+  validate: (cfg) => StorageFactory._validateGithubReleaseEncryptedConfig(cfg),
+  capabilities: ["ControlPlaneCapable", "ClientDirectMountCapable"],
+  ui: {
+    icon: "storage-github-release-encrypted",
+    i18nKey: "admin.storage.type.github_release_encrypted",
+    badgeTheme: "github",
+  },
+  configProjector(cfg, { withSecrets = false } = {}) {
+    const projected = {
+      owner: cfg?.owner,
+      repo: cfg?.repo,
+      release_id: cfg?.release_id,
+      release_tag: cfg?.release_tag,
+      manifest_asset_name: cfg?.manifest_asset_name,
+      chunk_asset_prefix: cfg?.chunk_asset_prefix,
+      api_base: cfg?.api_base,
+      upload_base: cfg?.upload_base,
+      chunk_size_mb: cfg?.chunk_size_mb,
+      compression: cfg?.compression,
+      encryption: cfg?.encryption,
+      total_storage_bytes: cfg?.total_storage_bytes,
+    };
+
+    if (withSecrets) {
+      projected.token = cfg?.token;
+    }
+
+    return projected;
+  },
+  configSchema: {
+    fields: [
+      {
+        name: "owner",
+        type: "string",
+        required: true,
+        labelKey: "admin.storage.fields.github_release_encrypted.owner",
+        ui: {
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.owner",
+          descriptionKey: "admin.storage.description.github_release_encrypted.owner",
+        },
+      },
+      {
+        name: "repo",
+        type: "string",
+        required: true,
+        labelKey: "admin.storage.fields.github_release_encrypted.repo",
+        ui: {
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.repo",
+          descriptionKey: "admin.storage.description.github_release_encrypted.repo",
+        },
+      },
+      {
+        name: "release_id",
+        type: "string",
+        required: false,
+        labelKey: "admin.storage.fields.github_release_encrypted.release_id",
+        ui: {
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.release_id",
+          descriptionKey: "admin.storage.description.github_release_encrypted.release_id",
+        },
+      },
+      {
+        name: "release_tag",
+        type: "string",
+        required: false,
+        defaultValue: "cloudpaste-main",
+        labelKey: "admin.storage.fields.github_release_encrypted.release_tag",
+        ui: {
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.release_tag",
+          descriptionKey: "admin.storage.description.github_release_encrypted.release_tag",
+        },
+      },
+      {
+        name: "manifest_asset_name",
+        type: "string",
+        required: false,
+        defaultValue: "index.manifest.json",
+        labelKey: "admin.storage.fields.github_release_encrypted.manifest_asset_name",
+        ui: {
+          fullWidth: true,
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.manifest_asset_name",
+          descriptionKey: "admin.storage.description.github_release_encrypted.manifest_asset_name",
+        },
+      },
+      {
+        name: "chunk_asset_prefix",
+        type: "string",
+        required: false,
+        defaultValue: "chunk__",
+        labelKey: "admin.storage.fields.github_release_encrypted.chunk_asset_prefix",
+        ui: {
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.chunk_asset_prefix",
+          descriptionKey: "admin.storage.description.github_release_encrypted.chunk_asset_prefix",
+        },
+      },
+      {
+        name: "chunk_size_mb",
+        type: "number",
+        required: false,
+        defaultValue: 64,
+        labelKey: "admin.storage.fields.github_release_encrypted.chunk_size_mb",
+        ui: {
+          descriptionKey: "admin.storage.description.github_release_encrypted.chunk_size_mb",
+        },
+      },
+      {
+        name: "compression",
+        type: "enum",
+        required: false,
+        defaultValue: "gzip",
+        labelKey: "admin.storage.fields.github_release_encrypted.compression",
+        enumValues: [
+          { value: "gzip", labelKey: "admin.storage.enum.github_release_encrypted.compression.gzip" },
+          { value: "none", labelKey: "admin.storage.enum.github_release_encrypted.compression.none" },
+        ],
+      },
+      {
+        name: "encryption",
+        type: "enum",
+        required: false,
+        defaultValue: "AES-GCM",
+        labelKey: "admin.storage.fields.github_release_encrypted.encryption",
+        enumValues: [
+          { value: "AES-GCM", labelKey: "admin.storage.enum.github_release_encrypted.encryption.aes_gcm" },
+        ],
+      },
+      {
+        name: "api_base",
+        type: "string",
+        required: false,
+        defaultValue: "https://api.github.com",
+        labelKey: "admin.storage.fields.github_release_encrypted.api_base",
+        validation: { rule: "url" },
+        ui: {
+          fullWidth: true,
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.api_base",
+          descriptionKey: "admin.storage.description.github_release_encrypted.api_base",
+        },
+      },
+      {
+        name: "upload_base",
+        type: "string",
+        required: false,
+        defaultValue: "https://uploads.github.com",
+        labelKey: "admin.storage.fields.github_release_encrypted.upload_base",
+        validation: { rule: "url" },
+        ui: {
+          fullWidth: true,
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.upload_base",
+          descriptionKey: "admin.storage.description.github_release_encrypted.upload_base",
+        },
+      },
+      {
+        name: "token",
+        type: "secret",
+        required: false,
+        labelKey: "admin.storage.fields.github_release_encrypted.token",
+        ui: {
+          fullWidth: true,
+          placeholderKey: "admin.storage.placeholder.github_release_encrypted.token",
+          descriptionKey: "admin.storage.description.github_release_encrypted.token",
+        },
+      },
+    ],
+    layout: {
+      groups: [
+        {
+          name: "basic",
+          titleKey: "admin.storage.groups.basic",
+          fields: [["owner", "repo"], ["release_id", "release_tag"], "manifest_asset_name"],
+        },
+        {
+          name: "behaviour",
+          titleKey: "admin.storage.groups.behaviour",
+          fields: [["chunk_asset_prefix", "chunk_size_mb"], ["compression", "encryption"]],
+        },
+        {
+          name: "advanced",
+          titleKey: "admin.storage.groups.advanced",
+          fields: ["api_base", "upload_base", "token"],
+        },
+      ],
+      summaryFields: ["owner", "repo", "release_id", "release_tag", "manifest_asset_name"],
     },
   },
 });

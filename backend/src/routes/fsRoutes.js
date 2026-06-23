@@ -14,6 +14,9 @@ import { FsMetaService } from "../services/fsMetaService.js";
 import { encryptValue, decryptValue } from "../utils/crypto.js";
 import { getEncryptionSecret } from "../utils/environmentUtils.js";
 import { createErrorResponse, jsonOk } from "../utils/common.js";
+import { findMountPointByPath } from "../storage/fs/utils/MountResolver.js";
+import { StorageFactory } from "../storage/factory/StorageFactory.js";
+import { getGithubReleaseEncryptedClientConfig } from "../services/githubReleaseEncryptedStorageService.js";
 
 const fsRoutes = new Hono();
 
@@ -222,6 +225,51 @@ fsRoutes.use(`${FS_BASE_PATH}/get`, usePolicy("fs.read"));
 fsRoutes.use(`${FS_BASE_PATH}/download`, usePolicy("fs.read"));
 fsRoutes.use(`${FS_BASE_PATH}/content`, usePolicy("fs.read"));
 fsRoutes.use(`${FS_BASE_PATH}/file-link`, usePolicy("fs.share-link"));
+
+fsRoutes.get(`${FS_BASE_PATH}/client-mount`, usePolicy("fs.list"), async (c) => {
+  const db = c.env.DB;
+  const rawPath = c.req.query("path") || "/";
+  const userInfo = c.get("userInfo");
+  const { userIdOrInfo, userType } = getServiceParams(userInfo);
+  const repositoryFactory = ensureRepositoryFactory(db);
+  const resolved = await findMountPointByPath(db, rawPath, userIdOrInfo, userType, repositoryFactory);
+
+  if (resolved?.error || !resolved?.mount) {
+    return jsonOk(c, { matched: false, path: normalizeFsPath(rawPath) }, "未匹配到客户端直连挂载");
+  }
+
+  const mount = resolved.mount;
+  if (userType === UserType.API_KEY) {
+    const accessibleMounts = await getAccessibleMountsForUser(db, userIdOrInfo, UserType.API_KEY, repositoryFactory);
+    if (!accessibleMounts.some((item) => item.id === mount.id)) {
+      throw new AuthorizationError("无权访问该挂载点");
+    }
+  }
+
+  const storageType = mount.storage_type;
+  const capabilities = StorageFactory.getRegisteredCapabilities(storageType) || [];
+  const isClientDirect = capabilities.includes("ClientDirectMountCapable");
+  const response = {
+    matched: true,
+    clientDirect: isClientDirect,
+    storageType,
+    capabilities,
+    mount: {
+      id: mount.id,
+      name: mount.name,
+      mountPath: mount.mount_path,
+      storageConfigId: mount.storage_config_id,
+      storageType,
+    },
+    subPath: resolved.subPath || "/",
+  };
+
+  if (isClientDirect && userType === UserType.ADMIN && storageType === StorageFactory.SUPPORTED_TYPES.GITHUB_RELEASE_ENCRYPTED && mount.storage_config_id) {
+    response.clientConfig = await getGithubReleaseEncryptedClientConfig(db, mount.storage_config_id, userIdOrInfo, repositoryFactory);
+  }
+
+  return jsonOk(c, response, "获取客户端直连挂载上下文成功");
+});
 
 // 目录路径密码校验接口
 fsRoutes.post(`${FS_BASE_PATH}/meta/password/verify`, async (c) => {

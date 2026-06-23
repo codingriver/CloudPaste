@@ -6,6 +6,7 @@ import apiKeyRoutes from "./routes/apiKeyRoutes.js";
 import { backupRoutes } from "./routes/backupRoutes.js";
 
 import storageConfigRoutes from "./routes/storageConfigRoutes.js";
+import githubReleaseEncryptedStorageRoutes from "./routes/githubReleaseEncryptedStorageRoutes.js";
 import systemRoutes from "./routes/systemRoutes.js";
 import mountRoutes from "./routes/mountRoutes.js";
 import webdavRoutes from "./routes/webdavRoutes.js";
@@ -192,6 +193,7 @@ app.route("/", filesRoutes);
 app.route("/", shareUploadRoutes);
 app.route("/", pastesRoutes);
 app.route("/", storageConfigRoutes);
+app.route("/", githubReleaseEncryptedStorageRoutes);
 app.route("/", systemRoutes);
 app.route("/", mountRoutes);
 app.route("/", webdavRoutes);

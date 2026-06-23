@@ -149,6 +149,20 @@ function shouldSkipSecretWrite(value, { allowEmpty = true } = {}) {
   return false;
 }
 
+function assertStorageConfigValid(storageType, configJson) {
+  if (storageType !== StorageFactory.SUPPORTED_TYPES.GITHUB_RELEASE_ENCRYPTED) {
+    return;
+  }
+  const validation = StorageFactory.validateConfig(storageType, configJson);
+  if (!validation?.valid) {
+    const errors = Array.isArray(validation?.errors) ? validation.errors.filter(Boolean) : [];
+    if (errors.length) {
+      throw new ValidationError(errors.join("；"));
+    }
+    throw new ValidationError(`存储配置无效: ${storageType}`);
+  }
+}
+
 async function encryptSecretsInConfigJson(storageType, configJson, encryptionSecret, { requireRequiredSecrets = false } = {}) {
   const schema = getTypeConfigSchema(storageType);
   const secretFields = getSecretFieldDefsFromSchema(schema);
@@ -344,6 +358,7 @@ export async function createStorageConfig(db, configData, adminId, encryptionSec
     }
     await encryptSecretsInConfigJson(configData.storage_type, configJson, encryptionSecret, { requireRequiredSecrets: true });
   }
+  assertStorageConfigValid(configData.storage_type, configJson);
   const createData = {
     id,
     name: configData.name,
@@ -445,6 +460,7 @@ export async function updateStorageConfig(db, id, updateData, adminId, encryptio
     }
   }
   topPatch.config_json = JSON.stringify(cfg);
+  assertStorageConfigValid(exists.storage_type, cfg);
 
   await repo.updateConfig(id, topPatch);
   if (topPatch.is_default === 1) {
@@ -489,6 +505,15 @@ export async function deleteStorageConfig(db, id, adminId, repositoryFactory = n
     } catch (error) {
       console.warn("删除存储配置关联的存储 ACL 失败，将继续删除存储配置本身：", error);
     }
+  }
+
+  try {
+    const githubReleaseKeyRepo = factory.getGithubReleaseFileKeyRepository ? factory.getGithubReleaseFileKeyRepository() : null;
+    if (githubReleaseKeyRepo) {
+      await githubReleaseKeyRepo.deleteByStorageConfigId(id);
+    }
+  } catch (error) {
+    console.warn("删除 GitHub Release 加密存储库文件密钥失败，将继续删除存储配置本身：", error);
   }
 
   // 删除存储配置前：先把依赖它的挂载点与索引派生数据清掉

@@ -37,6 +37,22 @@
           @toggle-plugin="togglePlugin"
         />
 
+        <div
+          v-if="errorMessage"
+          class="mb-4 rounded-md border px-3 py-2 text-sm"
+          :class="darkMode ? 'border-red-500/40 bg-red-950/30 text-red-200' : 'border-red-200 bg-red-50 text-red-700'"
+        >
+          {{ errorMessage }}
+        </div>
+
+        <div
+          v-if="githubReleaseProxyNotice"
+          class="mb-4 rounded-md border px-3 py-2 text-sm"
+          :class="darkMode ? 'border-blue-500/40 bg-blue-950/30 text-blue-200' : 'border-blue-200 bg-blue-50 text-blue-700'"
+        >
+          {{ githubReleaseProxyNotice }}
+        </div>
+
         <!-- Uppy Dashboard 容器 -->
         <UppyDashboardContainer
           ref="uppyContainerRef"
@@ -130,6 +146,7 @@ import { STORAGE_STRATEGIES } from "@/modules/storage-core/drivers/types.js";
 import { resolveDriverByConfigId } from "@/modules/storage-core/drivers/registry.js";
 import { useShareUploadController } from "@/modules/upload";
 import { normalizeFsPath } from "@/utils/fsPathUtils.js";
+import { useFsService } from "@/modules/fs/fsService.js";
 
 // 导入插件管理器
 import { createUppyPluginManager } from "@/modules/storage-core/uppy/UppyPluginManager.js";
@@ -233,11 +250,39 @@ const disposeFsSession = (shouldCancel = false) => {
 
 const storageConfigsStore = useStorageConfigsStore();
 const { createFsUploadSession } = useShareUploadController();
+const fsService = useFsService();
 const driverStrategy = ref(STORAGE_STRATEGIES.PRESIGNED_SINGLE);
 const mountsCache = ref([]);
 const mountsLoading = ref(false);
+const clientMountContext = ref(null);
+
+const getGithubReleaseUploadBase = (clientConfig = {}) =>
+  String(clientConfig?.uploadBase || clientConfig?.upload_base || "https://uploads.github.com").replace(/\/+$/, "");
+
+const isGithubReleaseBrowserUploadProxied = computed(() => {
+  if (currentDriverType.value !== "GITHUB_RELEASE_ENCRYPTED") return false;
+  const context = clientMountContext.value?.context;
+  const uploadBase = getGithubReleaseUploadBase(context?.clientConfig || {});
+  return uploadBase === "https://uploads.github.com";
+});
+
+const githubReleaseProxyNotice = computed(() => {
+  if (!isGithubReleaseBrowserUploadProxied.value) return "";
+  return "GitHub Release Asset 不支持浏览器跨域直传，本次上传会通过 CloudPaste 后端代理转发到 GitHub；加密、压缩和分包仍在浏览器完成。";
+});
 
 const enforceUploadMethodByDriver = (driver) => {
+  const driverType = driver?.config?.storage_type || driver?.type || null;
+  if (driverType === "GITHUB_RELEASE_ENCRYPTED") {
+    canUsePresigned.value = false;
+    canUseMultipart.value = false;
+    canUseStream.value = false;
+    canUseForm.value = true;
+    currentDriverType.value = driverType;
+    uploadMethod.value = "form";
+    return;
+  }
+
   const fsCaps = driver?.capabilities?.fs || {};
   const allowPresigned = fsCaps.presignedSingle === true;
   const allowMultipart = fsCaps.multipart === true;
@@ -265,9 +310,12 @@ const enforceUploadMethodByDriver = (driver) => {
 
 const getMountRootFromPath = (path) => {
   const normalized = normalizeFsPath(path);
-  const segments = normalized.split("/").filter(Boolean);
-  if (!segments.length) return null;
-  return `/${segments[0]}`;
+  const sortedMounts = [...mountsCache.value].sort((a, b) => String(b.mount_path || "").length - String(a.mount_path || "").length);
+  const matched = sortedMounts.find((mount) => {
+    const mountPath = normalizeFsPath(mount.mount_path || "/");
+    return normalized === mountPath || normalized.startsWith(`${mountPath}/`);
+  });
+  return matched?.mount_path || null;
 };
 
 const ensureMountsLoaded = async () => {
@@ -286,6 +334,11 @@ const ensureMountsLoaded = async () => {
 };
 
 const getStorageConfigIdForCurrentPath = async () => {
+  const directContext = await resolveClientMountContextForCurrentPath();
+  if (directContext?.clientDirect && directContext?.storageType === "GITHUB_RELEASE_ENCRYPTED") {
+    return directContext?.mount?.storageConfigId || directContext?.clientConfig?.storageId || null;
+  }
+
   await ensureMountsLoaded();
   const mountRoot = getMountRootFromPath(props.currentPath);
   if (!mountRoot) return null;
@@ -293,7 +346,38 @@ const getStorageConfigIdForCurrentPath = async () => {
   return mount?.storage_config_id || null;
 };
 
+const unwrapApiData = (response) => (response && typeof response === "object" && "data" in response ? response.data : response);
+
+const resolveClientMountContextForCurrentPath = async ({ force = false } = {}) => {
+  if (!force && clientMountContext.value?.path === props.currentPath) {
+    return clientMountContext.value.context;
+  }
+  try {
+    const response = await api.fs.getClientMountContext(props.currentPath);
+    const context = unwrapApiData(response);
+    clientMountContext.value = {
+      path: props.currentPath,
+      context,
+    };
+    return context;
+  } catch (error) {
+    log.warn("[Uppy] 获取客户端直连挂载上下文失败", error);
+    clientMountContext.value = {
+      path: props.currentPath,
+      context: null,
+    };
+    return null;
+  }
+};
+
 const ensureStorageConfigForCurrentPath = async () => {
+  const directContext = await resolveClientMountContextForCurrentPath();
+  if (directContext?.clientDirect && directContext?.storageType === "GITHUB_RELEASE_ENCRYPTED") {
+    const id = directContext?.mount?.storageConfigId || directContext?.clientConfig?.storageId || null;
+    if (!id) throw new Error(t("file.messages.noStorageConfig"));
+    return id;
+  }
+
   const id = await getStorageConfigIdForCurrentPath();
   if (!id) throw new Error(t("file.messages.noStorageConfig"));
 
@@ -383,6 +467,7 @@ const {
 const canStartUpload = computed(() => {
   const hasFiles = fileCount.value > 0 && !isUploading.value;
   if (!hasFiles) return false;
+  if (currentDriverType.value === "GITHUB_RELEASE_ENCRYPTED") return true;
 
   // 如果当前模式已被禁用，就不允许“开始上传”
   if (uploadMethod.value === "presigned") return canUsePresigned.value === true;
@@ -468,10 +553,27 @@ const strategyMap = {
  */
 const configureUploadMethod = async () => {
   try {
+    const directContext = await resolveClientMountContextForCurrentPath();
+    if (directContext?.clientDirect && directContext?.storageType === "GITHUB_RELEASE_ENCRYPTED") {
+      enforceUploadMethodByDriver({ type: "GITHUB_RELEASE_ENCRYPTED", config: { storage_type: "GITHUB_RELEASE_ENCRYPTED" } });
+      driverStrategy.value = STORAGE_STRATEGIES.BACKEND_FORM;
+      disposeFsAdapterHandle();
+      return;
+    }
+
     const storageConfigId = await ensureStorageConfigForCurrentPath();
     const driver = resolveDriverByConfigId(storageConfigId);
     enforceUploadMethodByDriver(driver);
     driverStrategy.value = strategyMap[uploadMethod.value] || STORAGE_STRATEGIES.BACKEND_STREAM;
+    if (
+      driver?.config?.storage_type === "GITHUB_RELEASE_ENCRYPTED" ||
+      driver?.type === "GITHUB_RELEASE_ENCRYPTED" ||
+      !driver?.fs?.applyFsUploader
+    ) {
+      disposeFsAdapterHandle();
+      return;
+    }
+
     if (
       driver?.fs?.applyFsUploader &&
       (driverStrategy.value === STORAGE_STRATEGIES.PRESIGNED_SINGLE ||
@@ -784,6 +886,54 @@ const normalizeFsUploadError = (error) => {
   return t("file.messages.uploadFailed");
 };
 
+const uploadGithubReleaseEncryptedFiles = async () => {
+  enforceUploadMethodByDriver({ type: "GITHUB_RELEASE_ENCRYPTED", config: { storage_type: "GITHUB_RELEASE_ENCRYPTED" } });
+  const files = uppyInstance.value.getFiles();
+  let uploaded = 0;
+
+  for (const uppyFile of files) {
+    const blob = uppyFile.data instanceof Blob ? uppyFile.data : new Blob([uppyFile.data], { type: uppyFile.type || "application/octet-stream" });
+    const file =
+      blob instanceof File && blob.name === uppyFile.name
+        ? blob
+        : new File([blob], uppyFile.name || "upload.bin", { type: uppyFile.type || blob.type || "application/octet-stream" });
+    const totalBytes = uppyFile.size || file.size || 0;
+
+    uppyInstance.value.setFileState(uppyFile.id, {
+      progress: {
+        uploadStarted: Date.now(),
+        uploadComplete: false,
+        percentage: 1,
+        bytesUploaded: 0,
+        bytesTotal: totalBytes,
+      },
+    });
+
+    await fsService.uploadFile(props.currentPath, file);
+    uploaded += 1;
+
+    uppyInstance.value.setFileState(uppyFile.id, {
+      progress: {
+        uploadStarted: Date.now(),
+        uploadComplete: true,
+        percentage: 100,
+        bytesUploaded: totalBytes,
+        bytesTotal: totalBytes,
+      },
+    });
+  }
+
+  emit("upload-success", {
+    count: uploaded,
+    skippedUploadCount: 0,
+    message: `上传完成：成功 ${uploaded} 个`,
+    commitFailures: [],
+    commitStats: { successCount: uploaded, failureCount: 0, totalCount: uploaded },
+    results: files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+  });
+  setTimeout(() => uppyInstance.value?.clear?.(), 1000);
+};
+
 /**
  * 开始上传
  */
@@ -796,9 +946,18 @@ const startUpload = async () => {
     errorMessage.value = "";
     isUploading.value = true;
     const storageConfigId = await ensureStorageConfigForCurrentPath();
+    const directContext = await resolveClientMountContextForCurrentPath();
+    if (directContext?.clientDirect && directContext?.storageType === "GITHUB_RELEASE_ENCRYPTED") {
+      await uploadGithubReleaseEncryptedFiles();
+      return;
+    }
     try {
       const driver = resolveDriverByConfigId(storageConfigId);
       enforceUploadMethodByDriver(driver);
+      if ((driver?.config?.storage_type || driver?.type) === "GITHUB_RELEASE_ENCRYPTED") {
+        await uploadGithubReleaseEncryptedFiles();
+        return;
+      }
     } catch (e) {
       log.warn("[Uppy] startUpload 驱动解析失败", e);
     }
@@ -923,6 +1082,7 @@ watch(
 watch(
   () => props.currentPath,
   async () => {
+    clientMountContext.value = null;
     if (!props.isOpen || !uppyInstance.value || isUploading.value) {
       return;
     }

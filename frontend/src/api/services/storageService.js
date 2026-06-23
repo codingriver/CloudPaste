@@ -47,3 +47,49 @@ export function setDefaultStorageConfig(id) {
 export function testStorageConfig(id) {
   return post(`/storage/${id}/test`);
 }
+
+export function getGithubReleaseEncryptedConfig(storageId) {
+  return get(`/storage/${storageId}/github-release/config`);
+}
+
+export function getGithubReleaseInitializationStatus(storageId) {
+  return get(`/storage/${storageId}/github-release/init-status`);
+}
+
+export function initializeGithubReleaseStorage(storageId) {
+  return post(`/storage/${storageId}/github-release/initialize`);
+}
+
+export function uploadGithubReleaseAsset(storageId, { releaseId, name, blob, contentType = "application/octet-stream" }) {
+  const query = new URLSearchParams();
+  if (releaseId != null) query.set("releaseId", String(releaseId));
+  query.set("name", String(name || ""));
+  return post(`/storage/${storageId}/github-release/assets?${query.toString()}`, blob, {
+    rawBody: true,
+    headers: {
+      "Content-Type": contentType || "application/octet-stream",
+    },
+    timeout: 300000,
+  });
+}
+
+export function deleteGithubReleaseAsset(storageId, assetId) {
+  return del(`/storage/${storageId}/github-release/assets/${encodeURIComponent(assetId)}`);
+}
+
+export function saveGithubReleaseFileKey(storageId, fileId, encryptionKey) {
+  return post(`/storage/${storageId}/github-release/files/${encodeURIComponent(fileId)}/key`, { encryptionKey });
+}
+
+export function updateGithubReleaseFileKey(storageId, fileId, encryptionKey) {
+  return put(`/storage/${storageId}/github-release/files/${encodeURIComponent(fileId)}/key`, { encryptionKey });
+}
+
+export function getGithubReleaseFileKey(storageId, fileId) {
+  return get(`/storage/${storageId}/github-release/files/${encodeURIComponent(fileId)}/key`);
+}
+
+export function deleteGithubReleaseFileKey(storageId, fileId, { hard = false } = {}) {
+  const query = hard ? "?hard=true" : "";
+  return del(`/storage/${storageId}/github-release/files/${encodeURIComponent(fileId)}/key${query}`);
+}

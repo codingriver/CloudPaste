@@ -11,6 +11,7 @@ export default {
       onedrive: "OneDrive storage",
       googledrive: "Google Drive storage",
       github_releases: "GitHub Releases",
+      github_release_encrypted: "GitHub Release encrypted storage",
       github_api: "GitHub API",
       telegram: "Telegram Bot API",
       discord: "Discord Bot API",
@@ -101,6 +102,21 @@ export default {
         show_release_notes: "Show Release Notes",
         per_page: "Releases per page",
         gh_proxy: "GitHub proxy URL",
+        token: "GitHub access token",
+      },
+
+      github_release_encrypted: {
+        owner: "Repository owner",
+        repo: "Repository name",
+        release_id: "Release ID",
+        release_tag: "Release tag",
+        manifest_asset_name: "Manifest asset name",
+        chunk_asset_prefix: "Chunk asset prefix",
+        chunk_size_mb: "Chunk size (MB)",
+        compression: "Compression",
+        encryption: "Encryption",
+        api_base: "GitHub API base",
+        upload_base: "GitHub upload base",
         token: "GitHub access token",
       },
 
@@ -200,6 +216,18 @@ export default {
         token: "Recommended to set a personal access token to raise rate limits",
       },
 
+      github_release_encrypted: {
+        owner: "e.g., ling-drag0n",
+        repo: "e.g., cloudpaste-storage",
+        release_id: "e.g., 123456789; leave empty to resolve by release tag",
+        release_tag: "e.g., cloudpaste-main",
+        manifest_asset_name: "e.g., index.manifest.json",
+        chunk_asset_prefix: "e.g., chunk__",
+        api_base: "Default: https://api.github.com",
+        upload_base: "Default: https://uploads.github.com",
+        token: "Token used by the browser to upload Release Assets directly; reveal only in the admin console",
+      },
+
       // GitHub API placeholders
       github_api: {
         owner: "e.g., ling-drag0n",
@@ -243,6 +271,15 @@ export default {
       mirror: {
         endpoint_url: "e.g., https://mirrors.tuna.tsinghua.edu.cn/",
         max_entries: "e.g., 1000",
+      },
+      github_release_encrypted: {
+        compression: {
+          gzip: "Gzip",
+          none: "No compression",
+        },
+        encryption: {
+          aes_gcm: "AES-GCM",
+        },
       },
     },
 
@@ -333,6 +370,21 @@ export default {
         gh_proxy:
           "Optional: Proxy prefix for accelerating GitHub downloads, e.g., fill in completely as https://gh-proxy.com/github.com or https://gh-proxy.com/https://github.com. Only effective for download links starting with https://github.com.",
         token: "Optional: GitHub personal access token. Used for private repositories or to increase API rate limits (strongly recommended for public-facing deployments).",
+      },
+
+      github_release_encrypted: {
+        owner: "GitHub repository owner for manifest and encrypted chunk assets.",
+        repo: "GitHub repository name for manifest and encrypted chunk assets.",
+        release_id: "Recommended stable Release ID. When provided, the frontend can use upload endpoints directly; otherwise it should resolve the release by tag first.",
+        release_tag: "Release tag used as a lookup fallback and as a human-readable migration anchor.",
+        manifest_asset_name: "Index asset fetched by the frontend. It stores directories, file names, times, display permissions, and chunk metadata.",
+        chunk_asset_prefix: "Filename prefix for encrypted chunk assets so they are easy to distinguish from ordinary release attachments.",
+        chunk_size_mb: "Frontend chunk size. Default 64MB; larger chunks reduce request count but increase retry cost.",
+        compression: "Compression applied before encryption. Compress before encrypting to get any compression benefit.",
+        encryption: "Frontend chunk encryption algorithm. This design uses browser WebCrypto AES-GCM.",
+        api_base: "GitHub REST API base. Keep the default for GitHub.com; change for Enterprise.",
+        upload_base: "GitHub Release Assets upload base. Keep the default for GitHub.com.",
+        token: "Optional: can be revealed in the admin console for browser direct upload/delete of Release Assets. CloudPaste does not proxy file streams.",
       },
 
       // GitHub API descriptions

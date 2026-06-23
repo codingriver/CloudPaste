@@ -55,6 +55,13 @@ const STORAGE_TYPE_CONFIG = {
     lightBg: "bg-gray-100",
     darkBg: "bg-gray-700",
   },
+  GITHUB_RELEASE_ENCRYPTED: {
+    icon: IconStorageGitHub,
+    lightColor: "text-gray-700",
+    darkColor: "text-gray-300",
+    lightBg: "bg-gray-100",
+    darkBg: "bg-gray-700",
+  },
   WEBDAV: {
     icon: IconStorageWebDAV,
     lightColor: "text-blue-600",

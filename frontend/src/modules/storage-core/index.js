@@ -1,6 +1,7 @@
 import { resolveDriverByConfigId, resolveDriverByType } from "@/modules/storage-core/drivers/registry.js";
 import { DRIVER_TYPES, STORAGE_STRATEGIES, STORAGE_SOURCES, DEFAULT_DRIVER_CAPABILITIES } from "@/modules/storage-core/drivers/types.js";
 import { useUploaderClient } from "@/modules/storage-core/useUploaderClient.js";
+import { createGithubReleaseClient } from "@/modules/storage-core/drivers/githubReleaseEncrypted/githubReleaseClient.js";
 
 /**
  * storage-core 模块入口
@@ -23,4 +24,5 @@ export {
 
   // uploader client
   useUploaderClient,
+  createGithubReleaseClient,
 };

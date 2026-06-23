@@ -16,6 +16,7 @@ export { FsMetaRepository } from "./FsMetaRepository.js";
 export { UploadPartsRepository } from "./UploadPartsRepository.js";
 export { VfsNodesRepository } from "./VfsNodesRepository.js";
 export { MetricsCacheRepository } from "./MetricsCacheRepository.js";
+export { GithubReleaseFileKeyRepository } from "./GithubReleaseFileKeyRepository.js";
 
 // 导入所有Repository类用于工厂类
 import { BaseRepository } from "./BaseRepository.js";
@@ -31,6 +32,7 @@ import { FsMetaRepository } from "./FsMetaRepository.js";
 import { UploadPartsRepository } from "./UploadPartsRepository.js";
 import { VfsNodesRepository } from "./VfsNodesRepository.js";
 import { MetricsCacheRepository } from "./MetricsCacheRepository.js";
+import { GithubReleaseFileKeyRepository } from "./GithubReleaseFileKeyRepository.js";
 import { createDbRuntime } from "../db/runtime.js";
 
 /**
@@ -174,6 +176,17 @@ export class RepositoryFactory {
   }
 
   /**
+   * 获取 GithubReleaseFileKeyRepository 实例
+   * @returns {GithubReleaseFileKeyRepository}
+   */
+  getGithubReleaseFileKeyRepository() {
+    if (!this._repositories.has("githubReleaseFileKey")) {
+      this._repositories.set("githubReleaseFileKey", new GithubReleaseFileKeyRepository(this.db, this.dialect));
+    }
+    return this._repositories.get("githubReleaseFileKey");
+  }
+
+  /**
    * 清理所有Repository实例缓存
    */
   clearCache() {
@@ -198,6 +211,7 @@ export class RepositoryFactory {
       uploadParts: this.getUploadPartsRepository(),
       vfsNodes: this.getVfsNodesRepository(),
       metricsCache: this.getMetricsCacheRepository(),
+      githubReleaseFileKey: this.getGithubReleaseFileKeyRepository(),
     };
   }
 

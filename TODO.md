@@ -3,6 +3,7 @@
 ## 项目规则
 
 - 所有文件管理操作继续遵守 [Worker Invocation 保护规则](./PROJECT_RULES.md#worker-invocation-保护)。
+- GitHub Release 加密存储库方案遵守 [GitHub Release 加密存储库设计](./GitHub-Release-Encrypted-Storage.md)，新增实现必须保持独立存储库类型、前端直传直下和 manifest/key 分离。
 - 新增批量、目录、跨存储、ZIP、统计、索引等功能时，必须默认按 Worker invocation 限制设计，不得在单次请求内同步处理不可预估数量的文件。
 
 ## 批量移动 / 大目录移动

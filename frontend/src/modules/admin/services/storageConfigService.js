@@ -185,6 +185,83 @@ export function useAdminStorageConfigService() {
     throw new Error("测试存储配置失败：响应结构无效");
   };
 
+  const getGithubReleaseEncryptedConfig = async (storageId) => {
+    const resp = await api.storage.getGithubReleaseEncryptedConfig(storageId);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "获取 GitHub Release 加密存储配置失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
+  const getGithubReleaseInitializationStatus = async (storageId) => {
+    const resp = await api.storage.getGithubReleaseInitializationStatus(storageId);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "检查 GitHub Release 初始化状态失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
+  const initializeGithubReleaseStorage = async (storageId) => {
+    const resp = await api.storage.initializeGithubReleaseStorage(storageId);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "初始化 GitHub Release 失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
+  const saveGithubReleaseFileKey = async (storageId, fileId, encryptionKey) => {
+    const resp = await api.storage.saveGithubReleaseFileKey(storageId, fileId, encryptionKey);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "保存文件密钥失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
+  const updateGithubReleaseFileKey = async (storageId, fileId, encryptionKey) => {
+    const resp = await api.storage.updateGithubReleaseFileKey(storageId, fileId, encryptionKey);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "更新文件密钥失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
+  const getGithubReleaseFileKey = async (storageId, fileId) => {
+    const resp = await api.storage.getGithubReleaseFileKey(storageId, fileId);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "获取文件密钥失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
+  const deleteGithubReleaseFileKey = async (storageId, fileId, options = {}) => {
+    const resp = await api.storage.deleteGithubReleaseFileKey(storageId, fileId, options);
+    if (typeof resp === "object" && "success" in resp) {
+      if (!resp.success) {
+        throw new Error(resp.message || "删除文件密钥失败");
+      }
+      return resp.data;
+    }
+    return resp;
+  };
+
   return {
     getStorageConfigs,
     getStorageConfigReveal,
@@ -193,5 +270,12 @@ export function useAdminStorageConfigService() {
     deleteStorageConfig,
     setDefaultStorageConfig,
     testStorageConfig,
+    getGithubReleaseEncryptedConfig,
+    getGithubReleaseInitializationStatus,
+    initializeGithubReleaseStorage,
+    saveGithubReleaseFileKey,
+    updateGithubReleaseFileKey,
+    getGithubReleaseFileKey,
+    deleteGithubReleaseFileKey,
   };
 }

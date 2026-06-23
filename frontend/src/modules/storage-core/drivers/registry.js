@@ -7,6 +7,7 @@ import { OneDriveDriver } from "./onedrive/OneDriveDriver.js";
 import { GoogleDriveDriver } from "./googledrive/GoogleDriveDriver.js";
 import { GithubApiDriver } from "./githubApi/GithubApiDriver.js";
 import { GithubReleasesDriver } from "./githubReleases/GithubReleasesDriver.js";
+import { GithubReleaseEncryptedDriver } from "./githubReleaseEncrypted/GithubReleaseEncryptedDriver.js";
 import { TelegramDriver } from "./telegram/TelegramDriver.js";
 import { DiscordDriver } from "./discord/DiscordDriver.js";
 import { HuggingFaceDatasetsDriver } from "./huggingfaceDatasets/HuggingFaceDatasetsDriver.js";
@@ -19,6 +20,7 @@ const driverFactories = new Map([
   [DRIVER_TYPES.ONEDRIVE, (config) => new OneDriveDriver(config)],
   [DRIVER_TYPES.GOOGLE_DRIVE, (config) => new GoogleDriveDriver(config)],
   [DRIVER_TYPES.GITHUB_RELEASES, (config) => new GithubReleasesDriver(config)],
+  [DRIVER_TYPES.GITHUB_RELEASE_ENCRYPTED, (config) => new GithubReleaseEncryptedDriver(config)],
   [DRIVER_TYPES.GITHUB_API, (config) => new GithubApiDriver(config)],
   [DRIVER_TYPES.TELEGRAM, (config) => new TelegramDriver(config)],
   [DRIVER_TYPES.DISCORD, (config) => new DiscordDriver(config)],

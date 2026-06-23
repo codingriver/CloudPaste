@@ -3,6 +3,7 @@ import { useAuthStore } from "@/stores/authStore.js";
 import { usePathPassword } from "@/composables/usePathPassword.js";
 import { useExplorerSettings } from "@/composables/useExplorerSettings.js";
 import { createLogger } from "@/utils/logger.js";
+import { createGithubReleaseEncryptedFsAdapter } from "@/modules/storage-core/drivers/githubReleaseEncrypted/githubReleaseEncryptedFsAdapter.js";
 
 /** @typedef {import("@/types/fs").FsDirectoryResponse} FsDirectoryResponse */
 /** @typedef {import("@/types/fs").FsDirectoryItem} FsDirectoryItem */
@@ -42,6 +43,7 @@ export function useFsService() {
     directory: null,
     fileInfo: null,
   };
+  const clientDirectAdapters = new Map();
 
   /**
    * 取消目录列表请求
@@ -84,6 +86,22 @@ export function useFsService() {
 
   const clearDirectoryListCache = () => {
     directoryListCache.clear();
+    clientDirectAdapters.clear();
+  };
+
+  const unwrapApiData = (response) => (response && typeof response === "object" && "data" in response ? response.data : response);
+
+  const resolveClientDirectAdapter = async (path, requestOptions = {}) => {
+    const response = await api.fs.getClientMountContext(path, requestOptions).catch(() => null);
+    const context = unwrapApiData(response);
+    if (!context?.clientDirect || context.storageType !== "GITHUB_RELEASE_ENCRYPTED") {
+      return null;
+    }
+    const key = `${context.mount?.id || ""}:${context.mount?.storageConfigId || ""}`;
+    if (!clientDirectAdapters.has(key)) {
+      clientDirectAdapters.set(key, createGithubReleaseEncryptedFsAdapter(context));
+    }
+    return clientDirectAdapters.get(key);
   };
 
   /**
@@ -142,6 +160,11 @@ export function useFsService() {
     }
 
     try {
+      const directAdapter = await resolveClientDirectAdapter(normalizedPath, requestOptions);
+      if (directAdapter) {
+        return await directAdapter.listDirectory(normalizedPath, { refresh: !!options.refresh });
+      }
+
       const response = await api.fs.getDirectoryList(normalizedPath, requestOptions);
       if (response?.notModified) {
         if (cached?.data) {
@@ -233,6 +256,11 @@ export function useFsService() {
     }
 
     try {
+      const directAdapter = await resolveClientDirectAdapter(normalizedPath, requestOptions);
+      if (directAdapter) {
+        return await directAdapter.getFileInfo(normalizedPath);
+      }
+
       const response = await api.fs.getFileInfo(path, requestOptions);
       if (!response?.success) {
         throw new Error(response?.message || "获取文件信息失败");
@@ -345,6 +373,13 @@ export function useFsService() {
    * @returns {Promise<true>}
    */
   const renameItem = async (oldPath, newPath) => {
+    const directAdapter = await resolveClientDirectAdapter(oldPath);
+    if (directAdapter) {
+      await directAdapter.renameItem(oldPath, newPath);
+      clientDirectAdapters.clear();
+      return true;
+    }
+
     const response = await api.fs.renameItem(oldPath, newPath);
     if (!response?.success) {
       throw new Error(response?.message || "重命名失败");
@@ -358,6 +393,13 @@ export function useFsService() {
    * @returns {Promise<true>}
    */
   const createDirectory = async (fullPath) => {
+    const directAdapter = await resolveClientDirectAdapter(fullPath);
+    if (directAdapter) {
+      await directAdapter.createDirectory(fullPath);
+      clientDirectAdapters.clear();
+      return true;
+    }
+
     const response = await api.fs.createDirectory(fullPath);
     if (!response?.success) {
       throw new Error(response?.message || "创建目录失败");
@@ -372,11 +414,31 @@ export function useFsService() {
    * @returns {Promise<true>}
    */
   const updateFile = async (fullPath, content = "") => {
+    const directAdapter = await resolveClientDirectAdapter(fullPath);
+    if (directAdapter) {
+      await directAdapter.updateFile(fullPath, content);
+      clientDirectAdapters.clear();
+      return true;
+    }
+
     const response = await api.fs.updateFile(fullPath, content);
     if (!response?.success) {
       throw new Error(response?.message || "文件写入失败");
     }
     return true;
+  };
+
+  const uploadFile = async (path, file, onXhrCreated) => {
+    const basePath = normalizeDirApiPath(path || "/");
+    const targetPath = `${basePath}${file?.name || "upload.bin"}`;
+    const directAdapter = await resolveClientDirectAdapter(targetPath);
+    if (directAdapter) {
+      await directAdapter.uploadFile(targetPath, file, { fileName: file?.name, contentType: file?.type });
+      clientDirectAdapters.clear();
+      return { success: true, data: { path: targetPath }, message: "上传成功" };
+    }
+
+    return api.fs.uploadFile(path, file, onXhrCreated);
   };
 
   /**
@@ -385,6 +447,23 @@ export function useFsService() {
    * @returns {Promise<{ success: boolean; message: string; status: string; raw: any }>}
    */
   const batchDeleteItems = async (paths) => {
+    const normalizedPaths = Array.isArray(paths) ? paths : [paths];
+    const directAdapter = normalizedPaths.length > 0 ? await resolveClientDirectAdapter(normalizedPaths[0]) : null;
+    if (directAdapter) {
+      const result = await directAdapter.batchDeleteItems(normalizedPaths);
+      clientDirectAdapters.clear();
+      return {
+        success: true,
+        message: "批量删除成功",
+        status: "success",
+        deletedPaths: result.deletedPaths || normalizedPaths,
+        raw: {
+          success: result.success || normalizedPaths.length,
+          failed: result.failed || [],
+        },
+      };
+    }
+
     const response = await api.fs.batchDeleteItems(paths);
     const payload = response && typeof response === "object" && "data" in response ? response.data : response;
     if (payload?.jobId) {
@@ -426,6 +505,25 @@ export function useFsService() {
   };
 
   const batchMoveItems = async (items, options = {}) => {
+    const firstSource = Array.isArray(items) && items.length > 0 ? items[0]?.sourcePath : null;
+    const directAdapter = firstSource ? await resolveClientDirectAdapter(firstSource) : null;
+    if (directAdapter) {
+      for (const item of items || []) {
+        if (!item?.sourcePath || !item?.targetPath) continue;
+        await directAdapter.renameItem(item.sourcePath, item.targetPath);
+      }
+      clientDirectAdapters.clear();
+      return {
+        success: true,
+        data: {
+          status: "completed",
+          taskType: "move",
+          stats: { total: Array.isArray(items) ? items.length : 0 },
+        },
+        message: "移动完成",
+      };
+    }
+
     return api.fs.batchMoveItems(items, options);
   };
 
@@ -453,6 +551,11 @@ export function useFsService() {
       }
     }
 
+    const directAdapter = await resolveClientDirectAdapter(normalizedPath, requestOptions);
+    if (directAdapter) {
+      return await directAdapter.getFileLink(normalizedPath);
+    }
+
     const url = await api.fs.getFileLink(normalizedPath, expiresIn, forceDownload, requestOptions);
     if (!url) {
       throw new Error("获取文件直链失败");
@@ -468,6 +571,12 @@ export function useFsService() {
    */
   const downloadFile = async (path, filename) => {
     const normalizedPath = path || "/";
+    const directAdapter = await resolveClientDirectAdapter(normalizedPath);
+    if (directAdapter) {
+      await directAdapter.downloadFile(normalizedPath, filename);
+      return;
+    }
+
     const url = await getFileLink(normalizedPath, null, true);
 
     const link = document.createElement("a");
@@ -533,6 +642,7 @@ export function useFsService() {
     renameItem,
     createDirectory,
     updateFile,
+    uploadFile,
     batchDeleteItems,
     batchCopyItems,
     batchMoveItems,

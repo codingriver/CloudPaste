@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS fs_search_index_state;
 DROP TABLE IF EXISTS fs_search_index_dirty;
 DROP TABLE IF EXISTS fs_search_index_fts;
 DROP TABLE IF EXISTS metrics_cache;
+DROP TABLE IF EXISTS github_release_file_keys;
 
 -- 创建pastes表 - 存储文本分享数据
 CREATE TABLE pastes (
@@ -115,6 +116,19 @@ CREATE TABLE principal_storage_acl (
   PRIMARY KEY (subject_type, subject_id, storage_config_id)
 );
 CREATE INDEX idx_psa_storage_config_id ON principal_storage_acl(storage_config_id);
+
+CREATE TABLE github_release_file_keys (
+  file_id TEXT NOT NULL,
+  storage_config_id TEXT NOT NULL,
+  encryption_key TEXT NOT NULL,
+  created_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (storage_config_id, file_id)
+);
+CREATE INDEX idx_grfk_file_id ON github_release_file_keys(file_id);
+CREATE INDEX idx_grfk_storage_deleted ON github_release_file_keys(storage_config_id, deleted);
 
 -- 创建files表 - 存储已上传文件的元数据（支持多存储类型）
 CREATE TABLE files (

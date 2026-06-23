@@ -10,7 +10,8 @@ import { useThemeMode } from "@/composables/core/useThemeMode.js";
 import { useConfirmDialog, createConfirmFn } from "@/composables/core/useConfirmDialog.js";
 import { useStorageTypePresentation } from "@/modules/admin/storage/useStorageTypePresentation.js";
 import { useStorageTypeIcon } from "@/composables/core/useStorageTypeIcon.js";
-import { IconArchive, IconCheck, IconCheckCircle, IconChevronRight, IconClose, IconCloud, IconDelete, IconError, IconExclamationSolid, IconFolderPlus, IconLink, IconRefresh, IconRename, IconShieldCheck, IconXCircle } from "@/components/icons";
+import GithubReleaseEncryptedManager from "@/modules/admin/components/GithubReleaseEncryptedManager.vue";
+import { IconArchive, IconCheck, IconCheckCircle, IconChevronRight, IconClose, IconCloud, IconDelete, IconError, IconExclamationSolid, IconFolderPlus, IconLink, IconRefresh, IconRename, IconSettings, IconShieldCheck, IconXCircle } from "@/components/icons";
 
 const { isDarkMode: darkMode } = useThemeMode();
 
@@ -140,6 +141,19 @@ const storageTypeOptions = computed(() =>
 
 const hasAnyConfig = computed(() => storageConfigs.value.length > 0);
 const hasFilteredResult = computed(() => filteredConfigs.value.length > 0);
+const isGithubReleaseEncryptedConfig = (config) => config?.storage_type === "GITHUB_RELEASE_ENCRYPTED";
+const selectedManagerConfig = ref(null);
+const showGithubReleaseEncryptedManager = ref(false);
+
+const openGithubReleaseEncryptedManager = (config) => {
+  selectedManagerConfig.value = config;
+  showGithubReleaseEncryptedManager.value = true;
+};
+
+const closeGithubReleaseEncryptedManager = () => {
+  showGithubReleaseEncryptedManager.value = false;
+  selectedManagerConfig.value = null;
+};
 
 /**
  * 将 camelCase/snake_case 转换为可读的标签
@@ -517,6 +531,16 @@ onMounted(async () => {
                   </button>
 
                   <button
+                    v-if="isGithubReleaseEncryptedConfig(config)"
+                    @click="openGithubReleaseEncryptedManager(config)"
+                    class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition"
+                    :class="darkMode ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-800'"
+                  >
+                    <IconSettings class="h-4 w-4 mr-1.5" />
+                    文件管理
+                  </button>
+
+                  <button
                     @click="editConfig(config)"
                     class="flex items-center px-3 py-1.5 rounded text-sm font-medium transition"
                     :class="darkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'"
@@ -801,6 +825,14 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <GithubReleaseEncryptedManager
+      v-if="selectedManagerConfig"
+      :is-open="showGithubReleaseEncryptedManager"
+      :dark-mode="darkMode"
+      :config="selectedManagerConfig"
+      @close="closeGithubReleaseEncryptedManager"
+    />
 
     <!-- 确认对话框 -->
     <ConfirmDialog

@@ -21,6 +21,7 @@ export const DbTables = {
   FS_SEARCH_INDEX_FTS: "fs_search_index_fts", // FS 搜索索引（FTS5 虚表，派生数据）
   FS_SEARCH_INDEX_DIRTY: "fs_search_index_dirty", // FS 搜索索引（dirty 队列表，派生数据）
   METRICS_CACHE: "metrics_cache", // 通用指标缓存表（快照/用量/配额等派生数据）
+  GITHUB_RELEASE_FILE_KEYS: "github_release_file_keys", // GitHub Release 加密存储库文件密钥
   TASKS: "tasks", // 任务编排表
   SCHEMA_MIGRATIONS: "schema_migrations", // 迁移历史表（用于记录 schema 版本）
   SCHEDULED_JOBS: "scheduled_jobs", // 后台调度作业表
@@ -44,6 +45,7 @@ export const ApiStatus = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   GONE: 410,
+  NOT_IMPLEMENTED: 501,
   INTERNAL_ERROR: 500,
 };
 

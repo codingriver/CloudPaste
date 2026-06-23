@@ -159,6 +159,8 @@ export async function createStorageTables(db) {
     .run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_psa_storage_config_id ON ${DbTables.PRINCIPAL_STORAGE_ACL}(storage_config_id)`).run();
 
+  await createGithubReleaseFileKeyTables(db);
+
   await db
     .prepare(
       `
@@ -185,6 +187,30 @@ export async function createStorageTables(db) {
     `
     )
     .run();
+}
+
+export async function createGithubReleaseFileKeyTables(db) {
+  console.log("创建 GitHub Release 加密存储库密钥表...");
+
+  await db
+    .prepare(
+      `
+      CREATE TABLE IF NOT EXISTS ${DbTables.GITHUB_RELEASE_FILE_KEYS} (
+        file_id TEXT NOT NULL,
+        storage_config_id TEXT NOT NULL,
+        encryption_key TEXT NOT NULL,
+        created_by TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (storage_config_id, file_id)
+      )
+    `,
+    )
+    .run();
+
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_grfk_file_id ON ${DbTables.GITHUB_RELEASE_FILE_KEYS}(file_id)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_grfk_storage_deleted ON ${DbTables.GITHUB_RELEASE_FILE_KEYS}(storage_config_id, deleted)`).run();
 }
 
 export async function createFileTables(db) {
@@ -748,6 +774,7 @@ export default {
   createPasteTables,
   createAdminTables,
   createStorageTables,
+  createGithubReleaseFileKeyTables,
   createFileTables,
   createFsMetaTables,
   createFsSearchIndexTables,

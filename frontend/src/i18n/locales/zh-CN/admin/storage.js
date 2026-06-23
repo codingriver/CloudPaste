@@ -11,6 +11,7 @@ export default {
       onedrive: "OneDrive",
       googledrive: "Google Drive",
       github_releases: "GitHub Releases",
+      github_release_encrypted: "GitHub Release 加密存储",
       github_api: "GitHub API",
       telegram: "Telegram Bot API",
       discord: "Discord Bot API",
@@ -104,6 +105,21 @@ export default {
         show_release_notes: "显示 Release Notes",
         per_page: "每次拉取的版本数量",
         gh_proxy: "GitHub 代理 URL",
+        token: "GitHub 访问令牌",
+      },
+
+      github_release_encrypted: {
+        owner: "仓库所有者（owner）",
+        repo: "仓库名称（repo）",
+        release_id: "Release ID",
+        release_tag: "Release Tag",
+        manifest_asset_name: "Manifest 文件名",
+        chunk_asset_prefix: "分包文件名前缀",
+        chunk_size_mb: "分包大小（MB）",
+        compression: "压缩方式",
+        encryption: "加密方式",
+        api_base: "GitHub API Base",
+        upload_base: "GitHub Upload Base",
         token: "GitHub 访问令牌",
       },
 
@@ -205,6 +221,18 @@ export default {
         token: "建议填写个人访问令牌以提升速率上限",
       },
 
+      github_release_encrypted: {
+        owner: "例如：ling-drag0n",
+        repo: "例如：cloudpaste-storage",
+        release_id: "例如：123456789；留空时使用 Release Tag 定位",
+        release_tag: "例如：cloudpaste-main",
+        manifest_asset_name: "例如：index.manifest.json",
+        chunk_asset_prefix: "例如：chunk__",
+        api_base: "默认：https://api.github.com",
+        upload_base: "默认：https://uploads.github.com",
+        token: "用于前端直传 Release Assets 的 Token；管理后台可按需揭示",
+      },
+
       // GitHub API 占位符
       github_api: {
         owner: "例如：ling-drag0n",
@@ -248,6 +276,15 @@ export default {
       mirror: {
         endpoint_url: "例如：https://mirrors.tuna.tsinghua.edu.cn/",
         max_entries: "例如：1000",
+      },
+      github_release_encrypted: {
+        compression: {
+          gzip: "Gzip",
+          none: "不压缩",
+        },
+        encryption: {
+          aes_gcm: "AES-GCM",
+        },
       },
     },
 
@@ -337,6 +374,21 @@ export default {
         gh_proxy:
           "可选：用于加速 GitHub 下载的代理前缀，例如 https://gh-proxy.com/github.com 或 https://gh-proxy.com/https://github.com 完整填入。仅对以 https://github.com 开头的下载链接生效。",
         token: "可选：GitHub 个人访问令牌。用于访问私有仓库或提升 API 速率限制（强烈推荐配置，尤其在公开站点中使用时）。",
+      },
+
+      github_release_encrypted: {
+        owner: "用于存放 manifest 和加密分包的 GitHub 仓库 owner。",
+        repo: "用于存放 manifest 和加密分包的 GitHub 仓库名称。",
+        release_id: "推荐填写稳定的 Release ID，前端可直接使用上传端点；如果留空，则需要先按 tag 查询 release。",
+        release_tag: "Release 标签名。未填写 Release ID 时作为定位入口，也便于迁移和人工识别。",
+        manifest_asset_name: "前端启动时直接从 Release 中读取的索引文件，保存目录、文件名、时间、权限展示字段和分包信息。",
+        chunk_asset_prefix: "加密分包上传到 Release Assets 时使用的文件名前缀，用于和普通附件区分。",
+        chunk_size_mb: "前端分包大小。默认 64MB；分包越大请求数越少，但失败重传成本越高。",
+        compression: "前端加密前的压缩方式。先压缩再加密，才能获得压缩效果。",
+        encryption: "前端分包加密算法。当前设计使用浏览器 WebCrypto AES-GCM。",
+        api_base: "GitHub REST API 地址。GitHub.com 使用默认值即可，企业版可改。",
+        upload_base: "GitHub Release Assets 上传地址。GitHub.com 使用默认值即可。",
+        token: "可选：保存后可由管理后台揭示给前端，用于浏览器直传/删除 Release Assets。CloudPaste 后台不代理文件流。",
       },
 
       // GitHub API 描述

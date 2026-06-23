@@ -43,6 +43,17 @@ export async function getDirectoryList(path, options = {}) {
   return get("/fs/list", requestOptions);
 }
 
+export async function getClientMountContext(path, options = {}) {
+  const requestOptions = { params: { path } };
+  if (options.headers) {
+    requestOptions.headers = options.headers;
+  }
+  if (options.signal) {
+    requestOptions.signal = options.signal;
+  }
+  return get("/fs/client-mount", requestOptions);
+}
+
 /**
  * 获取文件信息
  * @param {string} path 文件路径

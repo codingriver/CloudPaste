@@ -12,6 +12,7 @@ import {
   createUploadSessionsTables,
   createVfsTables,
   createMetricsCacheTables,
+  createGithubReleaseFileKeyTables,
 } from "./schema.js";
 import {
   addCustomContentSettings,
@@ -828,6 +829,12 @@ export async function runLegacyMigrationByVersion(db, version) {
 
       break;
     }
+
+    case 35:
+      console.log("版本35：检查并创建 GitHub Release 加密存储库密钥表...");
+      await createGithubReleaseFileKeyTables(db);
+      console.log("版本35：GitHub Release 加密存储库密钥表检查/创建完成。");
+      break;
 
     default:
       console.log(`未知的迁移版本: ${version}`);

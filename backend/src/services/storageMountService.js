@@ -7,6 +7,8 @@ import { generateUUID } from "../utils/common.js";
 import { MountRepository, StorageConfigRepository } from "../repositories/index.js";
 import { invalidateFsCache } from "../cache/invalidation.js";
 import { FsSearchIndexStore } from "../storage/fs/search/FsSearchIndexStore.js";
+import { StorageFactory } from "../storage/factory/StorageFactory.js";
+import { CAPABILITIES } from "../storage/interfaces/capabilities/index.js";
 
 const emitMountCacheInvalidation = ({ mountId, storageConfigId = null, reason, db = null }) => {
   if (!mountId && !storageConfigId) {
@@ -14,6 +16,10 @@ const emitMountCacheInvalidation = ({ mountId, storageConfigId = null, reason, d
   }
   invalidateFsCache({ mountId, storageConfigId, reason, bumpMountsVersion: true, db });
 };
+
+const supportsFileSystemMount = (storageType) =>
+  StorageFactory.supportsCapability(storageType, CAPABILITIES.READER) ||
+  StorageFactory.supportsCapability(storageType, "ClientDirectMountCapable");
 
 /**
  * 挂载点服务类
@@ -78,6 +84,12 @@ class MountService {
       const cfg = await this.storageConfigRepository.findById(mountData.storage_config_id);
       if (!cfg) {
         throw new ValidationError("指定的存储配置不存在");
+      }
+      if (cfg.storage_type !== mountData.storage_type) {
+        throw new ValidationError("挂载点存储类型与存储配置类型不一致");
+      }
+      if (!supportsFileSystemMount(mountData.storage_type)) {
+        throw new ValidationError("该存储类型不支持作为文件系统挂载点使用");
       }
       console.log(`创建挂载点: ${mountData.name}, 类型: ${mountData.storage_type}, 使用存储配置ID: ${mountData.storage_config_id}`);
     } else {
@@ -199,6 +211,17 @@ class MountService {
       const cfg = await this.storageConfigRepository.findById(updateData.storage_config_id);
       if (!cfg) {
         throw new ValidationError("指定的存储配置不存在");
+      }
+      const nextType = updateData.storage_type || existingMount.storage_type;
+      if (cfg.storage_type !== nextType) {
+        throw new ValidationError("挂载点存储类型与存储配置类型不一致");
+      }
+      if (!supportsFileSystemMount(nextType)) {
+        throw new ValidationError("该存储类型不支持作为文件系统挂载点使用");
+      }
+    } else if (updateData.storage_type && updateData.storage_type !== existingMount.storage_type) {
+      if (!supportsFileSystemMount(updateData.storage_type)) {
+        throw new ValidationError("该存储类型不支持作为文件系统挂载点使用");
       }
     }
 
