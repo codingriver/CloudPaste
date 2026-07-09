@@ -359,6 +359,18 @@ export class S3DirectoryOperations {
           };
         }
 
+        const targetKey = applyS3RootPrefix(this.config, s3SubPath);
+        const targetExists = await checkDirectoryExists(this.s3Client, this.config.bucket_name, targetKey);
+        if (targetExists) {
+          console.log(`目录已存在，跳过创建: ${targetKey}`);
+          return {
+            success: true,
+            path: path,
+            alreadyExists: true,
+            message: "目录已存在",
+          };
+        }
+
         // nginx风格的递归创建功能：自动创建所有需要的中间目录
         // 参考nginx WebDAV模块的create_full_put_path功能
         console.log(`开始递归创建目录: ${s3SubPath}`);
@@ -368,6 +380,7 @@ export class S3DirectoryOperations {
         return {
           success: true,
           path: path,
+          alreadyExists: false,
           message: "目录创建成功",
         };
       },

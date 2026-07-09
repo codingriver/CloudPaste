@@ -20,8 +20,8 @@ export async function handleMkcol(c, path, userId, userType, db) {
   return withWebDAVErrorHandling("MKCOL", async () => {
     // 检查请求是否包含正文（基本MKCOL请求不应包含正文）
     // 符合RFC 4918标准：基本MKCOL不应包含请求体，扩展MKCOL可以包含XML
-    const body = await c.req.text();
-    if (body.length > 0) {
+    const contentLength = Number(c.req.header("content-length") || 0);
+    if (Number.isFinite(contentLength) && contentLength > 0) {
       return new Response("MKCOL请求不应包含正文", {
         status: 415, // Unsupported Media Type
         headers: { "Content-Type": "text/plain" },
@@ -63,7 +63,20 @@ export async function handleMkcol(c, path, userId, userType, db) {
 
     // 使用FileSystem统一抽象层创建目录
     try {
-      await fileSystem.createDirectory(path, userId, userType);
+      const result = await fileSystem.createDirectory(path, userId, userType);
+      if (result?.alreadyExists) {
+        console.log(`WebDAV MKCOL - 目录已存在，按兼容模式返回201 Created: ${path}`);
+        return new Response(null, {
+          status: 201, // Created
+          headers: getStandardWebDAVHeaders({
+            customHeaders: {
+              "Content-Type": "text/plain",
+              "Content-Length": "0",
+            },
+          }),
+        });
+      }
+
       console.log(`WebDAV MKCOL - 目录创建成功: ${path}`);
 
       // 返回成功响应（符合WebDAV MKCOL标准）
