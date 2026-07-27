@@ -13,7 +13,7 @@ import { getMimeTypeFromFilename } from "../../utils/fileUtils.js";
 import { lockManager } from "../utils/LockManager.js";
 import { buildLockDiscoveryXML } from "../utils/lockUtils.js";
 import { WEBDAV_BASE_PATH } from "../auth/config/WebDAVConfig.js";
-import { getWebDAVMultiStatusHeaders } from "../utils/headerUtils.js";
+import { getCollectionContentLocation, getWebDAVMultiStatusHeaders } from "../utils/headerUtils.js";
 
 // 导入虚拟目录处理函数
 import { isVirtualPath, getVirtualDirectoryListing } from "../../storage/fs/utils/VirtualDirectory.js";
@@ -593,7 +593,7 @@ export async function handlePropfind(c, path, userId, userType, db) {
     const { getEncryptionSecret } = await import("../../utils/environmentUtils.js");
     const encryptionSecret = getEncryptionSecret(c);
     const repositoryFactory = c.get("repos");
-    return await processPropfindRequest(path, requestInfo, userIdOrInfo, actualUserType, db, encryptionSecret, repositoryFactory, c.env);
+    return await processPropfindRequest(path, requestInfo, userIdOrInfo, actualUserType, db, encryptionSecret, repositoryFactory, c.env, c.req.url);
   }, { includeDetails: false });
 }
 
@@ -607,9 +607,10 @@ export async function handlePropfind(c, path, userId, userType, db) {
  * @param {string} encryptionSecret - 加密密钥
  * @param {RepositoryFactory} repositoryFactory - 仓储工厂实例
  * @param {Object} env - Worker/Hono 环境
+ * @param {string} requestUrl - 当前请求的绝对 URL
  * @returns {Response} HTTP响应
  */
-async function processPropfindRequest(path, requestInfo, userIdOrInfo, actualUserType, db, encryptionSecret, repositoryFactory, env) {
+async function processPropfindRequest(path, requestInfo, userIdOrInfo, actualUserType, db, encryptionSecret, repositoryFactory, env, requestUrl) {
   try {
     // 检查API密钥用户的路径权限
     if (actualUserType === UserType.API_KEY) {
@@ -625,14 +626,14 @@ async function processPropfindRequest(path, requestInfo, userIdOrInfo, actualUse
     if (isVirtualPath(path, mounts)) {
       // 处理虚拟目录
       const basicPath = actualUserType === UserType.API_KEY ? userIdOrInfo.basicPath : null;
-      return await handleVirtualDirectoryPropfind(mounts, path, basicPath, requestInfo);
+      return await handleVirtualDirectoryPropfind(mounts, path, basicPath, requestInfo, requestUrl);
     }
 
     // 处理实际存储路径
     const mountManager = new MountManager(db, encryptionSecret, repositoryFactory, { env });
     const fileSystem = new FileSystem(mountManager);
 
-    return await handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo, actualUserType);
+    return await handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo, actualUserType, requestUrl);
   } catch (error) {
     console.error("处理PROPFIND请求失败:", error);
 
@@ -652,9 +653,10 @@ async function processPropfindRequest(path, requestInfo, userIdOrInfo, actualUse
  * @param {string} path - 请求路径
  * @param {string} basicPath - 基础路径（API密钥用户）
  * @param {Object} requestInfo - 请求信息
+ * @param {string} requestUrl - 当前请求的绝对 URL
  * @returns {Response} HTTP响应
  */
-async function handleVirtualDirectoryPropfind(mounts, path, basicPath, requestInfo) {
+async function handleVirtualDirectoryPropfind(mounts, path, basicPath, requestInfo, requestUrl) {
   try {
     const result = await getVirtualDirectoryListing(mounts, path, basicPath);
 
@@ -681,10 +683,11 @@ async function handleVirtualDirectoryPropfind(mounts, path, basicPath, requestIn
     }
 
     const xml = buildMultiStatusXML(responses);
+    const contentLocation = getCollectionContentLocation(requestUrl, webdavPath);
 
     return new Response(xml, {
       status: 207, // Multi-Status
-      headers: getWebDAVMultiStatusHeaders(),
+      headers: getWebDAVMultiStatusHeaders({ contentLocation }),
     });
   } catch (error) {
     console.error("处理虚拟目录PROPFIND失败:", error);
@@ -699,9 +702,10 @@ async function handleVirtualDirectoryPropfind(mounts, path, basicPath, requestIn
  * @param {Object} requestInfo - 请求信息
  * @param {string|Object} userIdOrInfo - 用户ID或信息
  * @param {string} actualUserType - 实际用户类型
+ * @param {string} requestUrl - 当前请求的绝对 URL
  * @returns {Response} HTTP响应
  */
-async function handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo, actualUserType) {
+async function handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo, actualUserType, requestUrl) {
   try {
     let result;
 
@@ -783,9 +787,13 @@ async function handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo
     //   console.log(`WebDAV PROPFIND XML响应预览: ${xml.substring(0, 200)}...`);
     // }
 
+    const contentLocation = isCurrentDirectory
+      ? getCollectionContentLocation(requestUrl, webdavPath)
+      : null;
+
     return new Response(xml, {
       status: 207, // Multi-Status
-      headers: getWebDAVMultiStatusHeaders(),
+      headers: getWebDAVMultiStatusHeaders({ contentLocation }),
     });
   } catch (error) {
     console.error("处理存储PROPFIND失败:", error);

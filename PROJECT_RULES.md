@@ -1,5 +1,13 @@
 # CloudPaste 项目规则
 
+## 部署指令默认语义
+
+- 在本项目的对话、任务和操作中，用户未明确指定目标平台时，凡提到“部署”“更新部署”“重新部署”“发布”“上线”“发版”“部署项目”“更新线上版本”及其他语义相近的表述，均默认指：将当前 CloudPaste 项目部署到 Cloudflare Workers。
+- 默认部署对象是 Cloudflare Workers 上的 `cloudpaste` Worker 项目，并按当前项目已有的 Worker 配置和部署流程执行。
+- 不得在未获得用户明确指示时，将上述部署指令解释为 Docker、Docker Compose、Cloudflare Pages、Vercel、Node.js 服务器或其他平台的部署。
+- 如果用户明确指定其他平台、项目名称、环境或部署方式，则以该次明确指示为准。
+- 涉及真实线上部署、更新或覆盖前，应先核对当前 Git 工作区、构建结果、Cloudflare Worker 配置和目标项目，避免发布错误代码或错误环境。
+
 ## Worker Invocation 保护
 
 CloudPaste 的部署目标包含 Cloudflare Workers。所有新增或修改的文件管理操作，都必须默认考虑 Worker 单次 invocation 的时间、内存、CPU、子请求和第三方 API 调用限制。

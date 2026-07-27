@@ -87,14 +87,42 @@ export function getWebDAVErrorHeaders(contentType = "text/plain") {
 /**
  * 获取WebDAV Multi-Status响应头
  * 专门用于207 Multi-Status响应的头部设置
+ * @param {Object} options - 响应头选项
+ * @param {string|null} options.contentLocation - 目录资源的规范位置
  * @returns {Object} Multi-Status响应头对象
  */
-export function getWebDAVMultiStatusHeaders() {
-  return getStandardWebDAVHeaders({
-    customHeaders: {
-      "Content-Type": "text/xml; charset=utf-8",
-    },
-  });
+export function getWebDAVMultiStatusHeaders(options = {}) {
+  const customHeaders = {
+    "Content-Type": "text/xml; charset=utf-8",
+  };
+
+  if (options.contentLocation) {
+    customHeaders["Content-Location"] = options.contentLocation;
+  }
+
+  return getStandardWebDAVHeaders({ customHeaders });
+}
+
+/**
+ * 为目录资源生成规范的 Content-Location 路径。
+ * 使用 absolute-path 形式可避免反向代理场景下产生错误的协议或主机名。
+ * 请求已使用尾斜杠时无需重复返回该响应头。
+ *
+ * @param {string} requestUrl - 当前请求 URL
+ * @param {string} collectionPath - 已确认是目录的 WebDAV 路径
+ * @returns {string|null} 规范路径；无需规范化时返回 null
+ */
+export function getCollectionContentLocation(requestUrl, collectionPath) {
+  const request = new URL(requestUrl);
+  if (request.pathname.endsWith("/")) {
+    return null;
+  }
+
+  const canonicalPath = collectionPath.endsWith("/") ? collectionPath : `${collectionPath}/`;
+  return canonicalPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 /**
