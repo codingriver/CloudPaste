@@ -14,6 +14,7 @@ import { lockManager } from "../utils/LockManager.js";
 import { buildLockDiscoveryXML } from "../utils/lockUtils.js";
 import { WEBDAV_BASE_PATH } from "../auth/config/WebDAVConfig.js";
 import { getCollectionContentLocation, getWebDAVMultiStatusHeaders } from "../utils/headerUtils.js";
+import { resolveDepthZeroResource } from "../utils/resourceUtils.js";
 
 // 导入虚拟目录处理函数
 import { isVirtualPath, getVirtualDirectoryListing } from "../../storage/fs/utils/VirtualDirectory.js";
@@ -710,27 +711,7 @@ async function handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo
     let result;
 
     if (requestInfo.depth === "0") {
-      // 只获取当前资源信息
-      try {
-        // WebDAV clients such as Joplin commonly probe collection URLs with a
-        // trailing slash and Depth: 0. Treat that path shape as a directory
-        // stat instead of passing it to file stat, because some drivers cannot
-        // stat collection marker paths reliably.
-        const fileInfo = path.endsWith("/")
-          ? await fileSystem.listDirectory(path, userIdOrInfo, actualUserType)
-          : await fileSystem.getFileInfo(path, userIdOrInfo, actualUserType);
-        result = {
-          path: path,
-          isDirectory: path.endsWith("/") ? true : fileInfo.isDirectory,
-          name: fileInfo.name,
-          size: path.endsWith("/") ? 0 : fileInfo.size,
-          modified: fileInfo.modified,
-          created: fileInfo.created,
-          items: [], // depth=0时不包含子项
-        };
-      } catch (error) {
-        throw error;
-      }
+      result = await resolveDepthZeroResource(fileSystem, path, userIdOrInfo, actualUserType);
     } else if (requestInfo.depth === "1") {
       // 获取当前资源和直接子项
       try {
@@ -798,9 +779,9 @@ async function handleStoragePropfind(fileSystem, path, requestInfo, userIdOrInfo
   } catch (error) {
     console.error("处理存储PROPFIND失败:", error);
 
-    if (error.message && error.message.includes("权限")) {
+    if (error?.status === 403 || (error.message && error.message.includes("权限"))) {
       return createErrorResponse(WEBDAV_BASE_PATH + path, 403, "权限不足");
-    } else if (error.message && error.message.includes("不存在")) {
+    } else if (error?.status === 404 || (error.message && error.message.includes("不存在"))) {
       return createErrorResponse(WEBDAV_BASE_PATH + path, 404, "资源不存在");
     } else {
       return createErrorResponse(WEBDAV_BASE_PATH + path, 500, "内部服务器错误");

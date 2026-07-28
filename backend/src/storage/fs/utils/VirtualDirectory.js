@@ -21,9 +21,19 @@ export function isVirtualPath(path, mounts) {
     return true;
   }
 
-  // 只要能解析到挂载点，就不是虚拟路径
+  // 能解析到挂载点（挂载点本身或其内部路径）时属于真实存储。
   const resolved = resolveMountFromList(normalizedPath, mounts);
-  return !resolved;
+  if (resolved) {
+    return false;
+  }
+
+  // 只有实际挂载点的祖先路径才是虚拟目录。
+  // 不能把任意无法解析的路径都当成 Collection，否则不存在路径会被伪造为 207。
+  const currentPath = normalizedPath.replace(/\/+$/, "") || "/";
+  return Array.isArray(mounts) && mounts.some((mount) => {
+    const mountPath = normalizePath(mount?.mount_path || "").replace(/\/+$/, "") || "/";
+    return mountPath !== currentPath && mountPath.startsWith(`${currentPath}/`);
+  });
 }
 
 /**

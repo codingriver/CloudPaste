@@ -83,16 +83,19 @@ export class WebDAVAuth {
    * @returns {boolean} 是否有权限
    */
   checkBasicPathPermission(basicPath, requestPath) {
-    if (!basicPath || basicPath === "/") {
-      return true; // 根路径权限
+    if (!basicPath || !requestPath) {
+      return false;
     }
 
-    // 规范化路径
-    const normalizedBasicPath = basicPath.endsWith("/") ? basicPath : basicPath + "/";
-    const normalizedRequestPath = requestPath.startsWith("/") ? requestPath : "/" + requestPath;
+    const normalize = (value) => {
+      const normalized = String(value).replace(/\\+/g, "/").replace(/\/+/g, "/");
+      const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
+      return withLeadingSlash === "/" ? "/" : withLeadingSlash.replace(/\/+$/, "");
+    };
 
-    // 检查请求路径是否在基础路径范围内
-    return normalizedRequestPath.startsWith(normalizedBasicPath) || normalizedRequestPath === basicPath;
+    const base = normalize(basicPath);
+    const target = normalize(requestPath);
+    return base === "/" || target === base || target.startsWith(`${base}/`);
   }
 
   /**
