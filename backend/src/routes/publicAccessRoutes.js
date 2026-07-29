@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { UserType } from "../constants/index.js";
-import { PublicRouteService } from "../services/publicRouteService.js";
+import { PublicRouteService, PUBLIC_ROUTE_RESERVED_PATHS, isSameOrSubPath } from "../services/publicRouteService.js";
 import { MountManager } from "../storage/managers/MountManager.js";
 import { StorageStreaming, STREAMING_CHANNELS } from "../storage/streaming/index.js";
 import { getEncryptionSecret } from "../utils/environmentUtils.js";
@@ -9,9 +9,18 @@ const publicAccessRoutes = new Hono();
 const PUBLIC_SYSTEM_USER = "system-public-route";
 const PUBLIC_MARKDOWN_RAW_QUERY = "__cloudpaste_raw";
 const MARKDOWN_PATH_PATTERN = /\.(?:md|markdown)$/i;
+const BYPASS_PUBLIC_ROUTE_LOOKUP_PATHS = PUBLIC_ROUTE_RESERVED_PATHS.filter(Boolean);
 
 export function isPublicMarkdownPath(path) {
   return MARKDOWN_PATH_PATTERN.test(String(path || ""));
+}
+
+export function shouldBypassPublicRouteLookup(path) {
+  const normalized = String(path || "/").split("?")[0] || "/";
+  return BYPASS_PUBLIC_ROUTE_LOOKUP_PATHS.some((reserved) => {
+    if (reserved === "/") return normalized === "/";
+    return isSameOrSubPath(normalized, reserved);
+  });
 }
 
 function escapeHtml(value) {
@@ -88,6 +97,7 @@ export function createPublicMarkdownResponse({ path, method = "GET", routeId = "
 
 async function handlePublicAccess(c) {
   if (c.req.method !== "GET" && c.req.method !== "HEAD") return c.notFound();
+  if (shouldBypassPublicRouteLookup(c.req.path)) return c.notFound();
 
   const resolved = await new PublicRouteService(c.env.DB, c.get("repos")).resolve(c.req.path);
   if (!resolved) return c.notFound();

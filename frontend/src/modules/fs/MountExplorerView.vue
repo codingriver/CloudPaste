@@ -194,7 +194,7 @@
       <InputDialog
         :is-open="publicRouteDialogOpen"
         title="公开访问设置"
-        :description="publicRouteExisting ? '修改公开路径；清空后保存可取消公开。' : '设置公开访问路径，例如 /downloads/manual.pdf。'"
+        :description="publicRouteDialogDescription"
         label="公开路径"
         :initial-value="publicRouteExisting?.publicPath || publicRouteSuggestedPath"
         placeholder="/public-path"
@@ -800,6 +800,15 @@ const publicRouteDialogOpen = ref(false);
 const publicRouteTarget = ref(null);
 const publicRouteExisting = ref(null);
 const publicRouteSuggestedPath = ref("");
+const publicRouteDialogDescription = computed(() => {
+  const isDirectory = Boolean(publicRouteTarget.value?.isDirectory);
+  if (isDirectory) {
+    return publicRouteExisting.value
+      ? "修改公开路径；文件夹公开根路径会读取目标目录下的 index.html，清空后保存可取消公开。"
+      : "设置公开访问路径，例如 /docs。访问该路径时默认读取目标目录下的 index.html。";
+  }
+  return publicRouteExisting.value ? "修改公开路径；清空后保存可取消公开。" : "设置公开访问路径，例如 /downloads/manual.pdf。";
+});
 const isSavingPublicRoute = ref(false);
 // 右键菜单高亮的项目路径（临时高亮，不是勾选选中）
 const contextHighlightPath = ref(null);

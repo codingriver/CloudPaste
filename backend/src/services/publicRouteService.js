@@ -1,7 +1,27 @@
 import { ValidationError, NotFoundError } from "../http/errors.js";
 import { ensureRepositoryFactory } from "../utils/repositories.js";
 
-const RESERVED_PATHS = ["/", "/api", "/dav", "/upload", "/admin", "/paste", "/file", "/mount-explorer", "/assets"];
+const RESERVED_PATHS = [
+  "/",
+  "/api",
+  "/dav",
+  "/upload",
+  "/admin",
+  "/paste",
+  "/file",
+  "/mount-explorer",
+  "/assets",
+  "/icons",
+  "/favicon.ico",
+  "/manifest.webmanifest",
+  "/robots.txt",
+  "/config.js",
+  "/registerSW.js",
+  "/sw.js",
+  "/cloudpaste.svg",
+  "/vite.svg",
+  "/apple-touch-icon.png",
+];
 const TARGET_TYPES = new Set(["file", "directory"]);
 
 function normalizePath(value, fieldName) {

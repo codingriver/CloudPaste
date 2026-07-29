@@ -4,6 +4,7 @@ import {
   createPublicMarkdownHtml,
   createPublicMarkdownResponse,
   isPublicMarkdownPath,
+  shouldBypassPublicRouteLookup,
 } from "./publicAccessRoutes.js";
 
 test("公开 Markdown 路径支持 md 和 markdown 扩展名", () => {
@@ -47,4 +48,16 @@ test("公开 Markdown HEAD 响应不返回页面正文", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Content-Type"), "text/html; charset=utf-8");
   assert.equal(await response.text(), "");
+});
+
+test("系统和静态资源路径会跳过公开路由 D1 查询", () => {
+  assert.equal(shouldBypassPublicRouteLookup("/"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/api/admin/public-routes"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/dav/docs"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/assets/app.js"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/icons/icon-192.png"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/favicon.ico"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/manifest.webmanifest"), true);
+  assert.equal(shouldBypassPublicRouteLookup("/assets-old/app.js"), false);
+  assert.equal(shouldBypassPublicRouteLookup("/docs/index.html"), false);
 });
