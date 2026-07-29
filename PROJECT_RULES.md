@@ -2,11 +2,21 @@
 
 ## 部署指令默认语义
 
-- 在本项目的对话、任务和操作中，用户未明确指定目标平台时，凡提到“部署”“更新部署”“重新部署”“发布”“上线”“发版”“部署项目”“更新线上版本”及其他语义相近的表述，均默认指：将当前 CloudPaste 项目部署到 Cloudflare Workers。
-- 默认部署对象是 Cloudflare Workers 上的 `cloudpaste` Worker 项目，并按当前项目已有的 Worker 配置和部署流程执行。
-- 不得在未获得用户明确指示时，将上述部署指令解释为 Docker、Docker Compose、Cloudflare Pages、Vercel、Node.js 服务器或其他平台的部署。
+- 在本项目的对话、任务和操作中，用户未明确指定目标平台时，凡提到“部署”“更新部署”“重新部署”“发布”“上线”“发版”“部署项目”“更新线上版本”“打包”“打包发布”“构建发布”“release”“publish”及其他语义相近的表述，均默认指：将当前 CloudPaste 项目部署到远程 Cloudflare Workers。
+- 默认部署对象固定为 Cloudflare Workers 上的 `cloudpaste` Worker 项目。
+- 默认部署配置固定为 `backend/wrangler.spa.toml`，该文件中的 `name = "cloudpaste"` 是默认远程 Worker 目标的权威来源。
+- 用户没有明确指定配置文件、部署模式或平台时，一律使用默认配置 `backend/wrangler.spa.toml` 进行远程部署。
+- 用户只说“默认配置”“线上配置”“生产配置”“远程部署”“打包发布”“发布线上”等但未给出具体配置文件时，也必须解析为 `backend/wrangler.spa.toml`。
+- 不得因为当前工作目录存在 `wrangler.toml`、`package.json` 中有其他部署脚本、GitHub Actions 中出现其他 Worker 名称或历史文档写法，而改用其他配置文件。
+- 默认部署命令必须在 `backend/` 目录执行：`npx wrangler deploy --config wrangler.spa.toml`。
+- 如需打包/发布，应先构建 `frontend/` 生产静态资源，并通过 `backend/wrangler.spa.toml` 的 `[assets] directory = "../frontend/dist"` 随 Worker 一体化发布。
+- `backend/wrangler.toml` 仅用于用户明确要求“前后端分离的后端 Worker 部署”时使用，不得作为默认部署配置。
+- `backend/wrangler.spa.local.toml` 仅用于本地或临时测试，不得作为远程默认部署配置。
+- 只有用户明确写出其他配置文件路径或明确要求其他部署方式时，才允许偏离 `backend/wrangler.spa.toml`。
+- 不得在未获得用户明确指示时，将上述部署/发布/打包指令解释为 Docker、Docker Compose、Cloudflare Pages、Vercel、Node.js 服务器、本地 Wrangler dev 或其他平台的部署。
 - 如果用户明确指定其他平台、项目名称、环境或部署方式，则以该次明确指示为准。
-- 涉及真实线上部署、更新或覆盖前，应先核对当前 Git 工作区、构建结果、Cloudflare Worker 配置和目标项目，避免发布错误代码或错误环境。
+- 涉及真实线上部署、更新或覆盖前，应先核对当前 Git 工作区、构建结果、`backend/wrangler.spa.toml`、目标 Worker 名称 `cloudpaste`、D1 绑定和必要 Secrets/变量，避免发布错误代码或错误环境。
+- 如果文档、脚本或工作流中出现其他默认 Worker 名称（例如 `cloudpaste-spa`），不得据此改变默认目标；应以 `backend/wrangler.spa.toml` 的 `name = "cloudpaste"` 和本规则为准，并向用户说明不一致。
 
 ## Worker Invocation 保护
 
