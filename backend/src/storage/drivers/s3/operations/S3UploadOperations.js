@@ -9,7 +9,7 @@ import { generateUploadUrl, buildS3Url } from "../utils/s3Utils.js";
 import { S3Client, PutObjectCommand, ListMultipartUploadsCommand, ListPartsCommand, UploadPartCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { updateMountLastUsed } from "../../../fs/utils/MountResolver.js";
-import { getMimeTypeFromFilename } from "../../../../utils/fileUtils.js";
+import { getEffectiveMimeType, getMimeTypeFromFilename } from "../../../../utils/fileUtils.js";
 import { handleFsError } from "../../../fs/utils/ErrorHandler.js";
 import { updateParentDirectoriesModifiedTime } from "../utils/S3DirectoryUtils.js";
 import { applyS3RootPrefix, resolveS3ObjectKey } from "../utils/S3PathUtils.js";
@@ -269,8 +269,9 @@ export class S3UploadOperations {
 
     return handleFsError(
       async () => {
-        // 推断MIME类型
-        const contentType = getMimeTypeFromFilename(fileName);
+        // 预签名请求中的 Content-Type 会参与 SigV4 校验，必须与浏览器 PUT 完全一致。
+        // 优先使用调用方传入的类型；无效或通用类型再按文件名推断。
+        const contentType = getEffectiveMimeType(options.contentType, fileName);
 
         // 构建最终的 S3 对象 Key（与直接上传逻辑保持一致）
         const finalS3Path = applyS3RootPrefix(this.config, resolveS3ObjectKey(s3SubPath, fileName));
@@ -285,6 +286,9 @@ export class S3UploadOperations {
           uploadUrl: presignedUrl,
           publicUrl: s3Url,
           contentType: contentType,
+          headers: {
+            "Content-Type": contentType,
+          },
           expiresIn: expiresIn,
           storagePath: finalS3Path,
           fileName: fileName,

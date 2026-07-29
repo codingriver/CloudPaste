@@ -143,6 +143,15 @@ const routes = [
         },
       },
       {
+        path: "public-routes",
+        name: "AdminPublicRoutes",
+        component: createOfflineAwareImport(() => import("../modules/admin/views/PublicRouteManagementView.vue"), "公开路由管理"),
+        meta: {
+          title: "公开路由管理 - CloudPaste",
+          adminOnly: true,
+        },
+      },
+      {
         path: "storage",
         name: "AdminStorage",
         component: createOfflineAwareImport(() => import("../modules/admin/views/StorageConfigView.vue"), "存储管理"),
@@ -705,6 +714,9 @@ router.afterEach(async (to, from) => {
         break;
       case "AdminFsMetaManagement":
         title = `${t("pageTitle.adminModules.fsMetaManagement")} - ${siteTitle}`;
+        break;
+      case "AdminPublicRoutes":
+        title = `公开路由管理 - ${siteTitle}`;
         break;
       case "AdminKeyManagement":
         title = `${t("pageTitle.adminModules.keyManagement")} - ${siteTitle}`;

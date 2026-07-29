@@ -12,6 +12,7 @@ import {
   createUploadSessionsTables,
   createVfsTables,
   createMetricsCacheTables,
+  createPublicRouteTables,
 } from "./schema.js";
 import {
   addCustomContentSettings,
@@ -828,6 +829,16 @@ export async function runLegacyMigrationByVersion(db, version) {
 
       break;
     }
+
+    case 35:
+      // 版本 35 已被既有发布占用，保留为空迁移以兼容历史数据库记录。
+      break;
+
+    case 36:
+      console.log("版本36：检查并创建文件/文件夹公开路由表...");
+      await createPublicRouteTables(db);
+      console.log("版本36：public_routes 表及索引检查/创建完成。");
+      break;
 
     default:
       console.log(`未知的迁移版本: ${version}`);

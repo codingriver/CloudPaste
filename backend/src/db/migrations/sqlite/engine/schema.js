@@ -241,6 +241,31 @@ export async function createFileTables(db) {
     .run();
 }
 
+export async function createPublicRouteTables(db) {
+  console.log("创建文件/文件夹公开路由表...");
+
+  await db
+    .prepare(
+      `
+      CREATE TABLE IF NOT EXISTS ${DbTables.PUBLIC_ROUTES} (
+        id TEXT PRIMARY KEY,
+        public_path TEXT NOT NULL UNIQUE,
+        target_fs_path TEXT NOT NULL,
+        target_type TEXT NOT NULL CHECK (target_type IN ('file', 'directory')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (target_fs_path, target_type)
+      )
+    `,
+    )
+    .run();
+
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_routes_target ON ${DbTables.PUBLIC_ROUTES}(target_fs_path, target_type)`).run();
+  await db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_routes_enabled_path ON ${DbTables.PUBLIC_ROUTES}(enabled, public_path)`).run();
+}
+
 export async function createFsMetaTables(db) {
   console.log("创建 FS 目录 Meta 表...");
 
@@ -749,6 +774,7 @@ export default {
   createAdminTables,
   createStorageTables,
   createFileTables,
+  createPublicRouteTables,
   createFsMetaTables,
   createFsSearchIndexTables,
   createSystemTables,

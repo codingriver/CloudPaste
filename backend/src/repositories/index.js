@@ -16,6 +16,7 @@ export { FsMetaRepository } from "./FsMetaRepository.js";
 export { UploadPartsRepository } from "./UploadPartsRepository.js";
 export { VfsNodesRepository } from "./VfsNodesRepository.js";
 export { MetricsCacheRepository } from "./MetricsCacheRepository.js";
+export { PublicRouteRepository } from "./PublicRouteRepository.js";
 
 // 导入所有Repository类用于工厂类
 import { BaseRepository } from "./BaseRepository.js";
@@ -31,6 +32,7 @@ import { FsMetaRepository } from "./FsMetaRepository.js";
 import { UploadPartsRepository } from "./UploadPartsRepository.js";
 import { VfsNodesRepository } from "./VfsNodesRepository.js";
 import { MetricsCacheRepository } from "./MetricsCacheRepository.js";
+import { PublicRouteRepository } from "./PublicRouteRepository.js";
 import { createDbRuntime } from "../db/runtime.js";
 
 /**
@@ -173,6 +175,13 @@ export class RepositoryFactory {
     return this._repositories.get("metricsCache");
   }
 
+  getPublicRouteRepository() {
+    if (!this._repositories.has("publicRoute")) {
+      this._repositories.set("publicRoute", new PublicRouteRepository(this.db, this.dialect));
+    }
+    return this._repositories.get("publicRoute");
+  }
+
   /**
    * 清理所有Repository实例缓存
    */
@@ -198,6 +207,7 @@ export class RepositoryFactory {
       uploadParts: this.getUploadPartsRepository(),
       vfsNodes: this.getVfsNodesRepository(),
       metricsCache: this.getMetricsCacheRepository(),
+      publicRoute: this.getPublicRouteRepository(),
     };
   }
 

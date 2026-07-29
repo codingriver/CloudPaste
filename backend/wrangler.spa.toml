@@ -2,7 +2,7 @@
 # 用途：将前端静态资源和后端 API 部署到同一个 Worker
 # 使用方式：npx wrangler deploy --config wrangler.spa.toml
 
-name = "cloudpaste-spa"
+name = "cloudpaste"
 main = "unified-entry.js"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
@@ -45,16 +45,16 @@ crons = ["*/5 * * * *"]
 [assets]
 # 静态资源目录（相对于 backend/ 目录）
 directory = "../frontend/dist"
+binding = "ASSETS"
 
 # SPA 模式：前端路由刷新时返回 index.html（避免 404）
 not_found_handling = "single-page-application"
 
-# 配置：明确指定这些路径优先进入 Worker 处理
-# 防止 API 请求被 SPA fallback 拦截
-run_worker_first = ["/api/*", "/dav/*"]
+# 公开路由支持任意未保留路径，因此所有请求先进入 Worker。
+# Worker 未命中 API/WebDAV/公开路由时会回退到 ASSETS 绑定。
+run_worker_first = ["/*"]
 
 # ==================== 路由优先级说明 ====================
-# 1. /api/* 和 /dav/* -> 优先进入 Worker 处理（run_worker_first）
-# 2. 静态文件存在 -> 直接返回（不调用 Worker）
-# 3. 前端路由（浏览器导航）-> 返回 index.html（SPA fallback）
-# 4. 导航请求在 compatibility_date >= 2025-04-01 时不计费
+# 1. API、WebDAV 与管理路由 -> Worker 固定路由
+# 2. 已启用的公开文件/文件夹路由 -> Worker 动态解析
+# 3. 未命中 Worker 路由 -> ASSETS 静态文件或 SPA fallback

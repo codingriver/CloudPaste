@@ -5,6 +5,7 @@ import {
   createFsSearchIndexTables,
   createIndexes,
   createPasteTables,
+  createPublicRouteTables,
   createMigrationTables,
   createScheduledJobRunsTables,
   createScheduledJobsTables,
@@ -38,6 +39,7 @@ export async function initDatabase(db) {
   await createAdminTables(db);
   await createStorageTables(db);
   await createFileTables(db);
+  await createPublicRouteTables(db);
   await createFsMetaTables(db);
   await createFsSearchIndexTables(db);
   await createMigrationTables(db);

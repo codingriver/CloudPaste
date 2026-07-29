@@ -28,6 +28,7 @@ export const DbTables = {
   UPLOAD_SESSIONS: "upload_sessions", // 通用上传会话表（前端分片/断点续传）
   UPLOAD_PARTS: "upload_parts", // 上传分片明细表（临时账本，一片一行）
   VFS_NODES: "vfs_nodes", // 虚拟目录树索引表（长期目录树/条目）
+  PUBLIC_ROUTES: "public_routes", // 文件/文件夹公开路由表
 };
 
 // 默认的最大上传大小（MB）

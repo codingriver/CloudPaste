@@ -20,6 +20,8 @@ import fileViewRoutes from "./routes/fileViewRoutes.js";
 import { fsProxyRoutes } from "./routes/fsProxyRoutes.js";
 import { proxyLinkRoutes } from "./routes/proxyLinkRoutes.js";
 import scheduledRoutes from "./routes/scheduledRoutes.js";
+import publicRouteRoutes from "./routes/publicRouteRoutes.js";
+import publicAccessRoutes from "./routes/publicAccessRoutes.js";
 import { securityContext } from "./security/middleware/securityContext.js";
 import { withRepositories } from "./utils/repositories.js";
 import { errorBoundary } from "./http/middlewares/errorBoundary.js";
@@ -200,11 +202,15 @@ app.route("/", fsMetaRoutes);
 app.route("/", fsProxyRoutes);
 app.route("/", proxyLinkRoutes);
 app.route("/", scheduledRoutes);
+app.route("/", publicRouteRoutes);
 
 // 健康检查路由
 app.get("/api/health", (c) => {
   return jsonOk(c, { status: "ok", timestamp: new Date().toISOString() });
 });
+
+// 系统 API/WebDAV/管理站路由均已注册；公开路由仅作为最后的 GET/HEAD 内容解析层。
+app.route("/", publicAccessRoutes);
 
 // 全局错误处理
 app.onError((err, c) => {
@@ -231,8 +237,14 @@ app.onError((err, c) => {
   );
 });
 
-// 404路由处理
-app.notFound((c) => {
+// 404路由处理：Worker-first 模式下，未命中的网页 GET/HEAD 回退到静态资源绑定。
+app.notFound(async (c) => {
+  const path = c.req.path;
+  const isSystemPath = path === "/api" || path.startsWith("/api/") || path === WEBDAV_BASE_PATH || path.startsWith(`${WEBDAV_BASE_PATH}/`);
+  if (!isSystemPath && (c.req.method === "GET" || c.req.method === "HEAD") && c.env?.ASSETS?.fetch) {
+    return await c.env.ASSETS.fetch(c.req.raw);
+  }
+
   const reqId = c.get("reqId");
   if (reqId) c.header("X-Request-Id", String(reqId));
   return c.json(

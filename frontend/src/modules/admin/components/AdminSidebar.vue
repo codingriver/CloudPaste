@@ -538,6 +538,7 @@ const menuIconMap = {
   globe: IconGlobeAlt,
   eye: IconEye,
   'cloud-webdav': IconLink,
+  link: IconLink,
   home: IconHome,
   logout: IconLogout,
   'chevron-down': IconChevronDown,
@@ -559,6 +560,7 @@ const visibleMenuItems = computed(() => {
       { id: "storage", name: t("admin.sidebar.storageConfig"), icon: "cloud", type: "item", routeName: "AdminStorage" },
       { id: "mount-management", name: t("admin.sidebar.mountManagement"), icon: "server", type: "item", routeName: "AdminMountManagement" },
       { id: "fs-meta-management", name: t("admin.sidebar.fsMetaManagement"), icon: "information-circle", type: "item", routeName: "AdminFsMetaManagement" },
+      { id: "public-routes", name: t("admin.sidebar.publicRoutes"), icon: "link", type: "item", routeName: "AdminPublicRoutes" },
       {
         id: "task-management",
         name: t("admin.sidebar.taskManagement"),

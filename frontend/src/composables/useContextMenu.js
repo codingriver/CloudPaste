@@ -57,6 +57,8 @@ export function useContextMenu(options = {}) {
     onOpen,
     onDownload,
     onGetLink,
+    onManagePublicRoute,
+    canManagePublicRoute = false,
     onRename,
     onDelete,
     onCopy,
@@ -72,6 +74,7 @@ export function useContextMenu(options = {}) {
     t,
   } = options
   const canWriteNow = () => (typeof canWrite === 'function' ? canWrite() : canWrite)
+  const canManagePublicRouteNow = () => (typeof canManagePublicRoute === 'function' ? canManagePublicRoute() : canManagePublicRoute)
   
   // 当前选中的项目
   const contextItem = ref(null)
@@ -102,6 +105,14 @@ export function useContextMenu(options = {}) {
         label: t?.('mount.fileItem.getLink') || '获取链接',
         icon: icons.link,
         onClick: () => onGetLink?.(item),
+      })
+    }
+
+    if (onManagePublicRoute && canManagePublicRouteNow()) {
+      items.push({
+        label: '公开访问设置',
+        icon: icons.link,
+        onClick: () => onManagePublicRoute(item),
       })
     }
 

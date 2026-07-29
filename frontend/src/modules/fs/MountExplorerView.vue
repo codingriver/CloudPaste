@@ -190,6 +190,26 @@
         @close="contextMenuRenameDialogOpen = false"
       />
 
+      <!-- 文件/文件夹公开路由设置 -->
+      <InputDialog
+        :is-open="publicRouteDialogOpen"
+        title="公开访问设置"
+        :description="publicRouteExisting ? '修改公开路径；清空后保存可取消公开。' : '设置公开访问路径，例如 /downloads/manual.pdf。'"
+        label="公开路径"
+        :initial-value="publicRouteExisting?.publicPath || publicRouteSuggestedPath"
+        placeholder="/public-path"
+        :required="false"
+        :validator="validatePublicRoutePath"
+        confirm-text="保存"
+        cancel-text="取消"
+        :loading="isSavingPublicRoute"
+        loading-text="保存中"
+        :dark-mode="darkMode"
+        @confirm="handlePublicRouteConfirm"
+        @cancel="handlePublicRouteCancel"
+        @close="publicRouteDialogOpen = false"
+      />
+
       <!-- 通用 ConfirmDialog 组件替换内联对话框 -->
       <ConfirmDialog
         :is-open="showDeleteDialog"
@@ -566,6 +586,7 @@ import { useFsService } from "@/modules/fs/fsService.js";
 import { copyToClipboard } from "@/utils/clipboard.js";
 import { TaskStatus, TaskType, useTaskManager } from "@/utils/taskManager.js";
 import { createLogger } from "@/utils/logger.js";
+import { createPublicRoute, deletePublicRoute, getPublicRouteStatus, updatePublicRoute } from "@/api/services/publicRouteService.js";
 
 const { t } = useI18n();
 const log = createLogger("MountExplorerView");
@@ -775,6 +796,11 @@ const contextMenuRenameDialogOpen = ref(false);
 const isRenaming = ref(false); // 重命名操作的 loading 状态
 const contextMenuCopyItems = ref([]);
 const contextMenuMoveItems = ref([]);
+const publicRouteDialogOpen = ref(false);
+const publicRouteTarget = ref(null);
+const publicRouteExisting = ref(null);
+const publicRouteSuggestedPath = ref("");
+const isSavingPublicRoute = ref(false);
 // 右键菜单高亮的项目路径（临时高亮，不是勾选选中）
 const contextHighlightPath = ref(null);
 // DirectoryList 组件引用
@@ -879,6 +905,8 @@ const initContextMenu = () => {
     },
     onDownload: handleDownload,
     onGetLink: handleGetLink,
+    onManagePublicRoute: handleManagePublicRoute,
+    canManagePublicRoute: () => isAdmin.value,
     onRename: handleContextRename,
     onDelete: handleContextDelete,
     onCopy: handleContextCopy,
@@ -1064,6 +1092,66 @@ const getItemParentPath = (item) => {
   const index = normalized.lastIndexOf("/");
   if (index <= 0) return "/";
   return `${normalized.slice(0, index)}/`.replace(/\/{2,}/g, "/");
+};
+
+const validatePublicRoutePath = (value) => {
+  if (!value) return true;
+  if (!value.startsWith("/")) return "公开路径必须以 / 开头";
+  if (value.includes("..")) return "公开路径不能包含 ..";
+  return true;
+};
+
+const handleManagePublicRoute = async (item) => {
+  if (!item?.path) return;
+  try {
+    publicRouteTarget.value = item;
+    const status = await getPublicRouteStatus(item.path, item.isDirectory ? "directory" : "file");
+    publicRouteExisting.value = status?.id ? status : null;
+    const safeName = String(item.name || "public").replace(/\s+/g, "-");
+    publicRouteSuggestedPath.value = `/${safeName}`;
+    publicRouteDialogOpen.value = true;
+  } catch (error) {
+    showMessage("error", error.message || "获取公开状态失败");
+  }
+};
+
+const handlePublicRouteConfirm = async (publicPath) => {
+  const target = publicRouteTarget.value;
+  if (!target) return;
+  isSavingPublicRoute.value = true;
+  try {
+    if (!publicPath && publicRouteExisting.value) {
+      await deletePublicRoute(publicRouteExisting.value.id);
+      showMessage("success", "已取消公开");
+    } else if (!publicPath) {
+      showMessage("warning", "请输入公开路径");
+      return;
+    } else if (publicRouteExisting.value) {
+      await updatePublicRoute(publicRouteExisting.value.id, { publicPath, enabled: true });
+      showMessage("success", "公开路径已更新");
+    } else {
+      await createPublicRoute({
+        publicPath,
+        targetFsPath: target.path,
+        targetType: target.isDirectory ? "directory" : "file",
+        enabled: true,
+      });
+      showMessage("success", "已设置为公开");
+    }
+    publicRouteDialogOpen.value = false;
+    publicRouteTarget.value = null;
+    publicRouteExisting.value = null;
+  } catch (error) {
+    showMessage("error", error.message || "保存公开路由失败");
+  } finally {
+    isSavingPublicRoute.value = false;
+  }
+};
+
+const handlePublicRouteCancel = () => {
+  publicRouteDialogOpen.value = false;
+  publicRouteTarget.value = null;
+  publicRouteExisting.value = null;
 };
 
 const handleContextRename = (item) => {

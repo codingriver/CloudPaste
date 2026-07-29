@@ -26,6 +26,23 @@ DROP TABLE IF EXISTS fs_search_index_state;
 DROP TABLE IF EXISTS fs_search_index_dirty;
 DROP TABLE IF EXISTS fs_search_index_fts;
 DROP TABLE IF EXISTS metrics_cache;
+DROP TABLE IF EXISTS public_routes;
+
+-- 文件/文件夹公开路由表（公开状态以该表为唯一事实来源）
+CREATE TABLE public_routes (
+  id TEXT PRIMARY KEY,
+  public_path TEXT NOT NULL UNIQUE,
+  target_fs_path TEXT NOT NULL,
+  target_type TEXT NOT NULL CHECK (target_type IN ('file', 'directory')),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (target_fs_path, target_type)
+);
+
+CREATE INDEX idx_public_routes_target ON public_routes(target_fs_path, target_type);
+CREATE INDEX idx_public_routes_enabled_path ON public_routes(enabled, public_path);
 
 -- 创建pastes表 - 存储文本分享数据
 CREATE TABLE pastes (
