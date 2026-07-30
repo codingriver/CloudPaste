@@ -76,7 +76,7 @@ export default {
 
       await ensureDbReadyOnce(env);
 
-      return app.fetch(request, bindings, ctx);
+      return await app.fetch(request, bindings, ctx);
     } catch (error) {
       console.error("处理请求时发生错误:", error);
       return new Response(
